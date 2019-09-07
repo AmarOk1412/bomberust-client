@@ -25,53 +25,48 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **/
 
+use serde::{Deserialize, Serialize};
+use rmps::{Deserializer, Serializer};
 
-extern crate env_logger;
-extern crate futures;
-#[macro_use]
-extern crate log;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate rmp_serde as rmps;
-extern crate tokio;
-extern crate tokio_rustls;
-extern crate tokio_stdin_stdout;
-extern crate webpki;
-extern crate webpki_roots;
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub struct Msg {
+    pub msg_type: String,
+}
 
-mod bomber;
+impl Msg {
+    pub fn new(msg_type: String) -> Msg {
+        Msg {
+            msg_type
+        }
+    }
+}
 
-use bomber::core::{Client, KeyHandler};
-use bomber::net::{TlsClient, TlsClientConfig};
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub struct PlayerMsg {
+    pub msg_type: String,
+    pub name: String,
+}
 
-use std::sync::{Arc, Mutex};
-use std::thread;
+impl PlayerMsg {
+    pub fn new(name: String) -> PlayerMsg {
+        PlayerMsg {
+            name,
+            msg_type: String::from("player")
+        }
+    }
+}
 
-fn main() {
-    // Init logging
-    env_logger::init();
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub struct JoinMsg {
+    pub msg_type: String,
+    pub room: u64,
+}
 
-    let send_buf: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
-    let send_buf_cloned = send_buf.clone();
-
-    let client = Arc::new(Mutex::new(Client::new(send_buf)));
-    let client_cloned = client.clone();
-    let client_thread = thread::spawn(move || {
-        let config = TlsClientConfig {
-            host : String::from("127.0.0.1"),
-            port : 2542,
-            cert : String::from("./ca.cert"),
-            client: client_cloned,
-        };
-        TlsClient::start(&config);
-    });
-
-    let key_handler_thread = thread::spawn(move || {
-        let mut key_handler = KeyHandler::new(send_buf_cloned);
-        key_handler.run();
-    });
-
-    let _ = client_thread.join();
-    let _ = key_handler_thread.join();
+impl JoinMsg {
+    pub fn new(room: u64) -> JoinMsg {
+        JoinMsg {
+            room,
+            msg_type: String::from("join")
+        }
+    }
 }

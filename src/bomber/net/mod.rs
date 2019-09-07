@@ -26,5 +26,6 @@
  **/
 
 mod tlsclient;
+pub mod msg;
 
 pub use tlsclient::{TlsClient, TlsClientConfig};

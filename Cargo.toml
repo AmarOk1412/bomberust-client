@@ -1,0 +1,15 @@
+[package]
+name = "bomberust-client"
+version = "0.1.0"
+authors = ["Sébastien Blin <amarok@enconn.fr>"]
+edition = "2018"
+
+[dependencies]
+env_logger = "0.5.6"
+log = "0.4.1"
+futures="0.1.28"
+tokio = { version = "0.1.6" }
+tokio-rustls="0.10"
+tokio-stdin-stdout="0.1.5"
+webpki="0.21"
+webpki-roots="0.17"

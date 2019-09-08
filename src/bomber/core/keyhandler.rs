@@ -30,6 +30,7 @@ use std::io::{stdin,stdout,Write};
 use serde::Serialize;
 use rmps::Serializer;
 
+use super::super::gen::utils::Direction;
 use super::super::net::msg::*;
 
 pub struct KeyHandler {
@@ -75,7 +76,7 @@ impl KeyHandler {
         println!(" g          start a new game");
         println!("");
         println!("Possible commands (in game):");
-        println!("Send A,W,S,D to move or SPACE to put a bomb");
+        println!("Send e,s,d,f to move or SPACE to put a bomb");
     }
 
     pub fn run(&mut self) {
@@ -115,6 +116,18 @@ impl KeyHandler {
                 } else if s.starts_with("j") {
                     let room: u64 = String::from(&s[2..]).parse().unwrap_or(0);
                     let msg = JoinMsg::new(room);
+                    msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
+                } else if s == "s" {
+                    let msg = MoveMsg::new(Direction::West);
+                    msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
+                } else if s == "d" {
+                    let msg = MoveMsg::new(Direction::South);
+                    msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
+                } else if s == "f" {
+                    let msg = MoveMsg::new(Direction::East);
+                    msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
+                } else if s == "e" {
+                    let msg = MoveMsg::new(Direction::North);
                     msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
                 }
                 self.send_rtp(&mut buf);

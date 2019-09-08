@@ -25,79 +25,52 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **/
 
-use serde::{Deserialize, Serialize};
-use rmps::{Deserializer, Serializer};
-use super::super::gen::utils::Direction;
+use super::super::utils::MapPlayer;
+use super::{Walkable, Item};
+use rand::{
+    distributions::{Distribution, Standard},
+    Rng,
+};
+use std::any::Any;
 
-// This file contains messages which will be wrapped via msgpack.
-// Each messages MUST have a unique msg_type.
-
-/**
- * Generic message
- */
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct Msg {
-    pub msg_type: String, // TODO enum
+#[derive(Clone, PartialEq)]
+pub enum Bonus {
+    ImproveBombRadius,
+    PunchBombs,
+    ImproveSpeed,
+    RepelBombs,
+    MoreBombs,
+    Custom(String)
 }
 
-impl Msg {
-    pub fn new(msg_type: String) -> Msg {
-        Msg {
-            msg_type
+impl Distribution<Bonus> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Bonus {
+        match rng.gen_range(0, 4) {
+            0 => Bonus::ImproveBombRadius,
+            1 => Bonus::PunchBombs,
+            2 => Bonus::ImproveSpeed,
+            3 => Bonus::RepelBombs,
+            _ => Bonus::MoreBombs,
         }
     }
 }
 
-/**
- * Message to send player details such as the name, its key, etc.
- */
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct PlayerMsg {
-    pub msg_type: String,
-    pub name: String,
-}
+impl Walkable for Bonus {
+    fn walkable(&self, _p: &MapPlayer, _pos: &(usize, usize)) -> bool {
+        true
+    }
 
-impl PlayerMsg {
-    pub fn new(name: String) -> PlayerMsg {
-        PlayerMsg {
-            name,
-            msg_type: String::from("player")
-        }
+    fn explode_event(&self, _pos: &(usize, usize), _bomb_pos: &(usize, usize)) -> (bool, bool) {
+        (true, true)
     }
 }
 
-/**
- * Message to join a room
- */
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct JoinMsg {
-    pub msg_type: String,
-    pub room: u64,
-}
-
-impl JoinMsg {
-    pub fn new(room: u64) -> JoinMsg {
-        JoinMsg {
-            room,
-            msg_type: String::from("join")
-        }
+impl Item for Bonus {
+    fn name(&self) -> String {
+        String::from("Bonus")
     }
-}
 
-/**
- * Message to move a player
- */
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct MoveMsg {
-    pub msg_type: String,
-    pub direction: Direction,
-}
-
-impl MoveMsg {
-    pub fn new(direction: Direction) -> MoveMsg {
-        MoveMsg {
-            msg_type: String::from("move"),
-            direction,
-        }
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }

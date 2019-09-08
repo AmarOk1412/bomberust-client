@@ -25,79 +25,29 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **/
 
-use serde::{Deserialize, Serialize};
-use rmps::{Deserializer, Serializer};
-use super::super::gen::utils::Direction;
+use super::super::utils::MapPlayer;
+use super::{Walkable, Item};
+use std::any::Any;
 
-// This file contains messages which will be wrapped via msgpack.
-// Each messages MUST have a unique msg_type.
+pub struct BombItem;
 
-/**
- * Generic message
- */
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct Msg {
-    pub msg_type: String, // TODO enum
-}
+impl Walkable for BombItem {
+    fn walkable(&self, _p: &MapPlayer, _pos: &(usize, usize)) -> bool {
+        false
+    }
 
-impl Msg {
-    pub fn new(msg_type: String) -> Msg {
-        Msg {
-            msg_type
-        }
+    fn explode_event(&self, pos: &(usize, usize), bomb_pos: &(usize, usize)) -> (bool, bool) {
+        (bomb_pos.0 != pos.0 || bomb_pos.1 != pos.1, true)
     }
 }
 
-/**
- * Message to send player details such as the name, its key, etc.
- */
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct PlayerMsg {
-    pub msg_type: String,
-    pub name: String,
-}
-
-impl PlayerMsg {
-    pub fn new(name: String) -> PlayerMsg {
-        PlayerMsg {
-            name,
-            msg_type: String::from("player")
-        }
+impl Item for BombItem {
+    // TODO better solution?
+    fn name(&self) -> String {
+        String::from("Bomb")
     }
-}
 
-/**
- * Message to join a room
- */
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct JoinMsg {
-    pub msg_type: String,
-    pub room: u64,
-}
-
-impl JoinMsg {
-    pub fn new(room: u64) -> JoinMsg {
-        JoinMsg {
-            room,
-            msg_type: String::from("join")
-        }
-    }
-}
-
-/**
- * Message to move a player
- */
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct MoveMsg {
-    pub msg_type: String,
-    pub direction: Direction,
-}
-
-impl MoveMsg {
-    pub fn new(direction: Direction) -> MoveMsg {
-        MoveMsg {
-            msg_type: String::from("move"),
-            direction,
-        }
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }

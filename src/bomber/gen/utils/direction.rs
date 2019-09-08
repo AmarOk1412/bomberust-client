@@ -25,79 +25,27 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **/
 
+use rand::{
+    distributions::{Distribution, Standard},
+    Rng,
+};
 use serde::{Deserialize, Serialize};
-use rmps::{Deserializer, Serializer};
-use super::super::gen::utils::Direction;
 
-// This file contains messages which will be wrapped via msgpack.
-// Each messages MUST have a unique msg_type.
-
-/**
- * Generic message
- */
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct Msg {
-    pub msg_type: String, // TODO enum
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+pub enum Direction {
+    North,
+    South,
+    West,
+    East,
 }
 
-impl Msg {
-    pub fn new(msg_type: String) -> Msg {
-        Msg {
-            msg_type
-        }
-    }
-}
-
-/**
- * Message to send player details such as the name, its key, etc.
- */
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct PlayerMsg {
-    pub msg_type: String,
-    pub name: String,
-}
-
-impl PlayerMsg {
-    pub fn new(name: String) -> PlayerMsg {
-        PlayerMsg {
-            name,
-            msg_type: String::from("player")
-        }
-    }
-}
-
-/**
- * Message to join a room
- */
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct JoinMsg {
-    pub msg_type: String,
-    pub room: u64,
-}
-
-impl JoinMsg {
-    pub fn new(room: u64) -> JoinMsg {
-        JoinMsg {
-            room,
-            msg_type: String::from("join")
-        }
-    }
-}
-
-/**
- * Message to move a player
- */
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct MoveMsg {
-    pub msg_type: String,
-    pub direction: Direction,
-}
-
-impl MoveMsg {
-    pub fn new(direction: Direction) -> MoveMsg {
-        MoveMsg {
-            msg_type: String::from("move"),
-            direction,
+impl Distribution<Direction> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Direction {
+        match rng.gen_range(0, 4) {
+            0 => Direction::North,
+            1 => Direction::South,
+            2 => Direction::West,
+            _ => Direction::East,
         }
     }
 }

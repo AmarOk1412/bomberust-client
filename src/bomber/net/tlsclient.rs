@@ -49,6 +49,8 @@ pub struct TlsClientConfig {
 pub struct TlsClient {
 }
 
+use futures::future;
+
 impl TlsClient {
     pub fn start(client_config: &TlsClientConfig) {
 
@@ -79,16 +81,22 @@ impl TlsClient {
         .and_then(|socket| {
             // TODO Framed buffer for RTP packets?
             let (mut rx, mut tx) = socket.split();
+            let connected = Arc::new(Mutex::new(true));
+            let connected_cln = connected.clone();
             let worker = Interval::new_interval(std::time::Duration::from_millis(1))
+            .take_while(move |_| {
+                future::ok(*connected.lock().unwrap())
+            })
             .for_each(move |_| {
                 if client_tx.lock().unwrap().send_buf.lock().unwrap().is_some() {
-                    tx.poll_write(
+                    *connected_cln.lock().unwrap() = tx.poll_write(
                         &*client_tx.lock().unwrap().send_buf.lock().as_ref().unwrap().as_ref().unwrap()
-                    ).map_err(|_| {
-                                //shut down the timer if an error occured (e.g. socket was closed)
-                                tokio::timer::Error::shutdown()
-                            })?;
+                    ).is_ok();
                     *client_tx.lock().unwrap().send_buf.lock().unwrap() = None;
+                }
+
+                if !*connected_cln.lock().unwrap() {
+                    return Ok(());
                 }
 
                 let mut buffer = vec![0u8; 65536];
@@ -97,15 +105,15 @@ impl TlsClient {
                         if n > 0 {
                             client_rx.lock().unwrap().process_rx(&buffer[..n].to_vec());
                         } else {
-                            warn!("Closed connection");
+                            warn!("Server disconnected");
+                            *connected_cln.lock().unwrap() = false;
                         }
                     }
                     Ok(Async::NotReady) => {}
-                    _ => { tokio::timer::Error::shutdown(); }
+                    _ => { *connected_cln.lock().unwrap() = false; }
                 };
-
                 return Ok(());
-            }).map_err(|e| error!("{}", e));
+            }).map_err(|e| error!("=>{}", e));
             tokio::spawn(worker);
             return Ok(());
         }).map_err(|e| error!("{}", e));

@@ -25,11 +25,13 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **/
 
-use futures::Async;
-use tokio_rustls::client::TlsStream;
-use tokio::net::TcpStream;
-use tokio::io::AsyncRead;
-use std::io::Write;
+use crate::bomber::net::msg::*;
+
+use futures::sync::mpsc;
+use rmps::Deserializer;
+use rmps::decode::Error;
+use serde::Deserialize;
+use std::io::Cursor;
 use std::sync::{Arc, Mutex};
 
 pub struct RtpBuf {
@@ -38,132 +40,103 @@ pub struct RtpBuf {
     wanted: u16,
 }
 
-pub struct Socket {
-    stream: Option<TlsStream<TcpStream>>,
-    rtp_buf: RtpBuf,
-}
-
 pub struct Client
 {
-    pub socket: Socket,
     pub send_buf: Arc<Mutex<Option<Vec<u8>>>>,
+    pub tx: mpsc::Sender<u8>,
+    pub rtp_buf: RtpBuf,
 }
 
 impl Client {
-    pub fn new(send_buf: Arc<Mutex<Option<Vec<u8>>>>) -> Client {
+    pub fn new(send_buf: Arc<Mutex<Option<Vec<u8>>>>, tx: mpsc::Sender<u8>) -> Client {
         Client {
+            tx,
             send_buf: send_buf,
-            socket: Socket {
-                stream: None,
-                rtp_buf: RtpBuf {
-                    data: [0; 65536],
-                    size: 0,
-                    wanted: 0,
-                } 
+            rtp_buf: RtpBuf {
+                data: [0; 65536],
+                size: 0,
+                wanted: 0,
             }
         }
     }
 
-    pub fn set_stream(&mut self, stream: TlsStream<TcpStream>) {
-        self.socket.stream = Some(stream);
-    }
-
-    pub fn parse_rtp(&mut self, pkt: String) {
-        debug!("rx:{}", pkt);
-    }
-
-    pub fn process_stream(&mut self) -> bool {
-        if self.socket.stream.is_none() {
-            return true;
+    pub fn parse_rtp(&mut self, pkt: Vec<u8>) {
+        info!("rx:{}", pkt.len());
+        let cur = Cursor::new(&*pkt);
+        let mut de = Deserializer::new(cur);
+        let actual: Result<Msg, Error> = Deserialize::deserialize(&mut de);
+        if actual.is_ok() {
+            let msg_type = actual.unwrap().msg_type;
+            let cur = Cursor::new(&*pkt);
+            let mut de = Deserializer::new(cur);
+            if msg_type == "map" {
+                let msg: MapMsg = Deserialize::deserialize(&mut de).unwrap();
+                println!("{}", msg.map);
+            }
         }
-        let mut buf = [0; 1024];
-        let mut result = true;
-        let mut pkts: Vec<String> = Vec::new();
-        let rtp_buf = &mut self.socket.rtp_buf;
-        match self.socket.stream.as_mut().unwrap().poll_read(&mut buf) {
-            Ok(Async::Ready(n)) => {
-                result = n != 0;
-                let size = n as u16;
-                if result {
-                    let mut parsed = 0;
-                    loop {
-                        let mut pkt_len = size - parsed;
-                        let mut store_remaining = true;
-                        let mut start = parsed;
-                        
-                        if rtp_buf.size != 0 || rtp_buf.wanted != 0 {
-                            // There is a packet to complete
-                            if rtp_buf.size == 1 {
-                                pkt_len = ((rtp_buf.data[0] as u16) << 8) + buf[0] as u16;
-                                rtp_buf.size = 0; // The packet is eaten
-                                parsed += 1;
-                                start += 1;
-                                if pkt_len + parsed <= size {
-                                    store_remaining = false;
-                                    parsed += size;
-                                } else {
-                                    rtp_buf.wanted = pkt_len;
-                                }
-                            } else if pkt_len + rtp_buf.size >= rtp_buf.wanted {
-                                // We have enough data to build the new packet to parse
-                                store_remaining = false;
-                                let eaten_bytes = rtp_buf.wanted - rtp_buf.size;
-                                rtp_buf.data[rtp_buf.size as usize..]
-                                    .copy_from_slice(&buf[(parsed as usize)..(parsed as usize + eaten_bytes as usize)]);
-                                pkt_len = rtp_buf.wanted;
-                                parsed += eaten_bytes;
-                                rtp_buf.size = 0;
-                                rtp_buf.wanted = 0;
-                            }
-                        } else if pkt_len > 1 {
-                            pkt_len = ((buf[0] as u16) << 8) + buf[1] as u16;
-                            parsed += 2;
-                            start += 2;
-                            if pkt_len + parsed <= size {
-                                store_remaining = false;
-                                parsed += pkt_len;
-                            } else {
-                                rtp_buf.wanted = pkt_len;
-                            }
-                        }
-                        if store_remaining {
-                            let stored_size = size - parsed;
-                            rtp_buf.data[rtp_buf.size as usize..]
-                                .copy_from_slice(&buf[(parsed as usize)..(parsed as usize + stored_size as usize)]);
-                            rtp_buf.size += stored_size;
-                            break;
-                        }
+    }
 
-                        let pkt = buf[(start as usize)..(start as usize + pkt_len as usize)].to_vec();
-                        pkts.push(String::from_utf8(pkt).unwrap_or(String::new()));
+    pub fn process_rx(&mut self, buf: &Vec<u8>) {
+        let mut pkts: Vec<Vec<u8>> = Vec::new();
+        let rtp_buf = &mut self.rtp_buf;
+        let size = buf.len() as u16;
+        let mut parsed = 0;
+        loop {
+            let mut pkt_len = size - parsed;
+            let mut store_remaining = true;
+            let mut start = parsed;
 
-                        if parsed >= size {
-                            break;
-                        }
+            if rtp_buf.size != 0 || rtp_buf.wanted != 0 {
+                // There is a packet to complete
+                if rtp_buf.size == 1 {
+                    pkt_len = ((rtp_buf.data[0] as u16) << 8) + buf[0] as u16;
+                    rtp_buf.size = 0; // The packet is eaten
+                    parsed += 1;
+                    start += 1;
+                    if pkt_len + parsed <= size {
+                        store_remaining = false;
+                        parsed += size;
+                    } else {
+                        rtp_buf.wanted = pkt_len;
                     }
+                } else if pkt_len + rtp_buf.size >= rtp_buf.wanted {
+                    // We have enough data to build the new packet to parse
+                    store_remaining = false;
+                    let eaten_bytes = rtp_buf.wanted - rtp_buf.size;
+                    rtp_buf.data[rtp_buf.size as usize..]
+                        .copy_from_slice(&buf[(parsed as usize)..(parsed as usize + eaten_bytes as usize)]);
+                    pkt_len = rtp_buf.wanted;
+                    parsed += eaten_bytes;
+                    rtp_buf.size = 0;
+                    rtp_buf.wanted = 0;
                 }
-            },
-            Ok(Async::NotReady) => {}
-            Err(_) => { result = false; }
-        };
+            } else if pkt_len > 1 {
+                pkt_len = ((buf[0] as u16) << 8) + buf[1] as u16;
+                parsed += 2;
+                start += 2;
+                if pkt_len + parsed <= size {
+                    store_remaining = false;
+                    parsed += pkt_len;
+                } else {
+                    rtp_buf.wanted = pkt_len;
+                }
+            }
+            if store_remaining {
+                let stored_size = size - parsed;
+                rtp_buf.data[rtp_buf.size as usize..]
+                    .copy_from_slice(&buf[(parsed as usize)..(parsed as usize + stored_size as usize)]);
+                rtp_buf.size += stored_size;
+                break;
+            }
+
+            let pkt = buf[(start as usize)..(start as usize + pkt_len as usize)].to_vec();
+            pkts.push(pkt);
+            if parsed >= size {
+                break;
+            }
+        }
         for pkt in pkts {
             self.parse_rtp(pkt);
         }
-        if !result {
-            return false;
-        }
-
-        if self.send_buf.lock().unwrap().is_some() {
-            match self.socket.stream.as_mut().unwrap().write(
-                &*self.send_buf.lock().as_ref().unwrap().as_ref().unwrap()) {
-                Err(_) => {
-                    result = false;
-                }
-                _ => {}
-            }
-            *self.send_buf.lock().unwrap() = None;
-        }
-    
-        result
     }
 }

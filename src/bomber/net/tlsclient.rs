@@ -26,14 +26,16 @@
  **/
 
 
+use futures::Stream;
 use std::fs;
 use std::io::BufReader;
 use std::net::ToSocketAddrs;
+use tokio::io::{AsyncRead, AsyncWrite };
 use tokio::net::TcpStream;
-use tokio::prelude::Future;
+use tokio::prelude::{ Async, Future };
+use tokio::timer::Interval;
 use tokio_rustls::{ TlsConnector, rustls::ClientConfig };
 use std::sync::{Arc, Mutex};
-use std::{thread, time};
 
 use super::super::core::Client;
 
@@ -65,28 +67,48 @@ impl TlsClient {
         }
         let config = TlsConnector::from(Arc::new(config));
 
+        let client_rx = client_config.client.clone();
+        let client_tx = client_config.client.clone();
+
         let socket = TcpStream::connect(&addr);
-
-        let client = client_config.client.clone();
-
         let done = socket
-            .and_then(move |stream| {
-                let domain = webpki::DNSNameRef::try_from_ascii_str("localhost").unwrap();
-                config.connect(domain, stream)
-            })
-            .and_then(move |stream| {
-                client.lock().unwrap().set_stream(stream);
-                let process_delay = time::Duration::from_nanos(100);
-                loop {
-                    if !client.lock().unwrap().process_stream() {
-                        break;
-                    }
-                    thread::sleep(process_delay);
+        .and_then(move |stream| {
+            let domain = webpki::DNSNameRef::try_from_ascii_str("localhost").unwrap();
+            config.connect(domain, stream)
+        })
+        .and_then(|socket| {
+            // TODO Framed buffer for RTP packets?
+            let (mut rx, mut tx) = socket.split();
+            let worker = Interval::new_interval(std::time::Duration::from_millis(1))
+            .for_each(move |_| {
+                if client_tx.lock().unwrap().send_buf.lock().unwrap().is_some() {
+                    tx.poll_write(
+                        &*client_tx.lock().unwrap().send_buf.lock().as_ref().unwrap().as_ref().unwrap()
+                    ).map_err(|_| {
+                                //shut down the timer if an error occured (e.g. socket was closed)
+                                tokio::timer::Error::shutdown()
+                            })?;
+                    *client_tx.lock().unwrap().send_buf.lock().unwrap() = None;
                 }
-                Ok(())
-            })
-            .map(drop)
-            .map_err(|err| eprintln!("{:?}", err));
+
+                let mut buffer = vec![0u8; 65536];
+                match rx.poll_read(&mut buffer) {
+                    Ok(Async::Ready(n)) => {
+                        if n > 0 {
+                            client_rx.lock().unwrap().process_rx(&buffer[..n].to_vec());
+                        } else {
+                            warn!("Closed connection");
+                        }
+                    }
+                    Ok(Async::NotReady) => {}
+                    _ => { tokio::timer::Error::shutdown(); }
+                };
+
+                return Ok(());
+            }).map_err(|e| error!("{}", e));
+            tokio::spawn(worker);
+            return Ok(());
+        }).map_err(|e| error!("{}", e));
 
         tokio::run(done);
     }

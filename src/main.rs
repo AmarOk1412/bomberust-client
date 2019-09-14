@@ -37,6 +37,7 @@ extern crate rmp_serde as rmps;
 extern crate tokio;
 extern crate tokio_rustls;
 extern crate tokio_stdin_stdout;
+extern crate typetag;
 extern crate webpki;
 extern crate webpki_roots;
 
@@ -47,6 +48,7 @@ use bomber::net::{TlsClient, TlsClientConfig};
 
 use std::sync::{Arc, Mutex};
 use std::thread;
+use futures::sync::mpsc;
 
 fn main() {
     // Init logging
@@ -54,8 +56,9 @@ fn main() {
 
     let send_buf: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
     let send_buf_cloned = send_buf.clone();
+    let (tx, rx) = mpsc::channel::<u8>(65536);
 
-    let client = Arc::new(Mutex::new(Client::new(send_buf)));
+    let client = Arc::new(Mutex::new(Client::new(send_buf, tx)));
     let client_cloned = client.clone();
     let client_thread = thread::spawn(move || {
         let config = TlsClientConfig {

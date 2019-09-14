@@ -28,8 +28,8 @@
 /**
  * Represent a player on a map
  */
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub struct MapPlayer {
-    pub x: usize, // TODO float
-    pub y: usize // TODO float
+    pub x: f32,
+    pub y: f32
 }

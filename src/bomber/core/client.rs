@@ -33,6 +33,8 @@ use rmps::decode::Error;
 use serde::Deserialize;
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
+use crate::bomber::net::diff_msg::*;
+use crate::bomber::gen::map::Map;
 
 pub struct RtpBuf {
     data: [u8; 65536],
@@ -45,6 +47,7 @@ pub struct Client
     pub send_buf: Arc<Mutex<Option<Vec<u8>>>>,
     pub tx: mpsc::Sender<u8>,
     pub rtp_buf: RtpBuf,
+    pub map: Option<Map>
 }
 
 impl Client {
@@ -56,8 +59,17 @@ impl Client {
                 data: [0; 65536],
                 size: 0,
                 wanted: 0,
-            }
+            },
+            map: None
         }
+    }
+
+    pub fn move_player(&mut self, diff: PlayerMove) {
+        let map = self.map.as_mut().unwrap();
+        let player = &mut map.players[diff.id as usize];
+        player.x = diff.x;
+        player.y = diff.y;
+        println!("{}", map);
     }
 
     pub fn parse_rtp(&mut self, pkt: Vec<u8>) {
@@ -72,6 +84,10 @@ impl Client {
             if msg_type == "map" {
                 let msg: MapMsg = Deserialize::deserialize(&mut de).unwrap();
                 println!("{}", msg.map);
+                self.map = Some(msg.map);
+            } else if msg_type == "player_move_diff" {
+                let msg: PlayerMove = Deserialize::deserialize(&mut de).unwrap();
+                self.move_player(msg);
             }
         }
     }

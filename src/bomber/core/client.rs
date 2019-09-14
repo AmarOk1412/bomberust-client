@@ -35,6 +35,7 @@ use std::io::Cursor;
 use std::sync::{Arc, Mutex};
 use crate::bomber::net::diff_msg::*;
 use crate::bomber::gen::map::Map;
+use crate::bomber::gen::item::*;
 
 pub struct RtpBuf {
     data: [u8; 65536],
@@ -72,6 +73,19 @@ impl Client {
         println!("{}", map);
     }
 
+    pub fn player_put_bomb(&mut self, diff: PlayerPutBomb) {
+        let map = self.map.as_mut().unwrap();
+        let item = &mut map.items[diff.x + diff.y * map.w];
+        *item = Some(Box::new(bomb::BombItem {}));
+        println!("{}", map);
+    }
+
+    pub fn player_die(&mut self, diff: PlayerDie) {
+        let map = self.map.as_mut().unwrap();
+        map.players.remove(diff.id as usize);
+        println!("{}", map);
+    }
+
     pub fn parse_rtp(&mut self, pkt: Vec<u8>) {
         info!("rx:{}", pkt.len());
         let cur = Cursor::new(&*pkt);
@@ -88,6 +102,12 @@ impl Client {
             } else if msg_type == "player_move_diff" {
                 let msg: PlayerMove = Deserialize::deserialize(&mut de).unwrap();
                 self.move_player(msg);
+            } else if msg_type == "player_put_bomb_diff" {
+                let msg: PlayerPutBomb = Deserialize::deserialize(&mut de).unwrap();
+                self.player_put_bomb(msg);
+            } else if msg_type == "player_die" {
+                let msg: PlayerDie = Deserialize::deserialize(&mut de).unwrap();
+                self.player_die(msg);
             }
         }
     }

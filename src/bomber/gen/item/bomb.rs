@@ -53,7 +53,7 @@ impl Item for BombItem {
         self
     }
 
-    fn box_clone(&self) -> Box<Item> {
+    fn box_clone(&self) -> Box<dyn Item> {
         Box::new((*self).clone())
     }
 }

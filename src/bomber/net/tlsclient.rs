@@ -30,7 +30,7 @@ use futures::Stream;
 use std::fs;
 use std::io::BufReader;
 use std::net::ToSocketAddrs;
-use tokio::io::{AsyncRead, AsyncWrite };
+use tokio::io::{ AsyncRead, AsyncWrite };
 use tokio::net::TcpStream;
 use tokio::prelude::{ Async, Future };
 use tokio::timer::Interval;

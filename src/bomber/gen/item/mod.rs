@@ -29,8 +29,8 @@ use super::utils::MapPlayer;
 
 use std::any::Any;
 use std::fmt::Debug;
-use serde::{Serialize, Deserialize};
-use rmps::{Deserializer, Serializer};
+use serde::Serialize;
+use rmps::Serializer;
 
 pub trait Walkable {
     fn walkable(&self, p: &MapPlayer, pos: &(usize, usize)) -> bool;
@@ -44,7 +44,7 @@ pub trait Item: Walkable + Sync + Send + Debug {
 
     fn as_any(&self) -> &dyn Any;
 
-    fn box_clone(&self) -> Box<Item>;
+    fn box_clone(&self) -> Box<dyn Item>;
 }
 
 pub type InteractiveItem = Box<dyn Item>;
@@ -62,9 +62,9 @@ impl PartialEq for Box<dyn Item> {
     }
 }
 
-impl Clone for Box<Item>
+impl Clone for Box<dyn Item>
 {
-    fn clone(&self) -> Box<Item> {
+    fn clone(&self) -> Box<dyn Item> {
         self.box_clone()
     }
 }

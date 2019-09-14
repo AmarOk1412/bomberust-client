@@ -80,6 +80,27 @@ impl Client {
         println!("{}", map);
     }
 
+    pub fn bomb_explode(&mut self, diff: BombExplode) {
+        let map = self.map.as_mut().unwrap();
+        let item = &mut map.items[diff.w as usize + diff.h as usize * map.w];
+        *item = None;
+        println!("{}", map);
+    }
+
+    pub fn create_item(&mut self, diff: CreateItem) {
+        let map = self.map.as_mut().unwrap();
+        let item = &mut map.items[diff.w as usize + diff.h as usize * map.w];
+        *item = diff.item;
+        println!("{}", map);
+    }
+
+    pub fn destroy_item(&mut self, diff: DestroyItem) {
+        let map = self.map.as_mut().unwrap();
+        let item = &mut map.items[diff.w as usize + diff.h as usize * map.w];
+        *item = None;
+        println!("{}", map);
+    }
+
     pub fn player_die(&mut self, diff: PlayerDie) {
         let map = self.map.as_mut().unwrap();
         map.players.remove(diff.id as usize);
@@ -87,7 +108,6 @@ impl Client {
     }
 
     pub fn parse_rtp(&mut self, pkt: Vec<u8>) {
-        info!("rx:{}", pkt.len());
         let cur = Cursor::new(&*pkt);
         let mut de = Deserializer::new(cur);
         let actual: Result<Msg, Error> = Deserialize::deserialize(&mut de);
@@ -95,6 +115,7 @@ impl Client {
             let msg_type = actual.unwrap().msg_type;
             let cur = Cursor::new(&*pkt);
             let mut de = Deserializer::new(cur);
+            info!("RX {}", msg_type);
             if msg_type == "map" {
                 let msg: MapMsg = Deserialize::deserialize(&mut de).unwrap();
                 println!("{}", msg.map);
@@ -108,6 +129,17 @@ impl Client {
             } else if msg_type == "player_die" {
                 let msg: PlayerDie = Deserialize::deserialize(&mut de).unwrap();
                 self.player_die(msg);
+            } else if msg_type == "bomb_explode" {
+                let msg: BombExplode = Deserialize::deserialize(&mut de).unwrap();
+                self.bomb_explode(msg);
+            } else if msg_type == "destroy_item" {
+                let msg: DestroyItem = Deserialize::deserialize(&mut de).unwrap();
+                self.destroy_item(msg);
+            } else if msg_type == "create_item" {
+                let msg: CreateItem = Deserialize::deserialize(&mut de).unwrap();
+                self.create_item(msg);
+            } else {
+                info!("unknown type: {}", msg_type);
             }
         }
     }

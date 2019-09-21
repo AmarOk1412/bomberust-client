@@ -69,8 +69,7 @@ impl TlsClient {
         }
         let config = TlsConnector::from(Arc::new(config));
 
-        let client_rx = client_config.client.clone();
-        let client_tx = client_config.client.clone();
+        let client = client_config.client.clone();
 
         let socket = TcpStream::connect(&addr);
         let done = socket
@@ -88,11 +87,11 @@ impl TlsClient {
                 future::ok(*connected.lock().unwrap())
             })
             .for_each(move |_| {
-                if client_tx.lock().unwrap().send_buf.lock().unwrap().is_some() {
+                if client.lock().unwrap().send_buf.lock().unwrap().is_some() {
                     *connected_cln.lock().unwrap() = tx.poll_write(
-                        &*client_tx.lock().unwrap().send_buf.lock().as_ref().unwrap().as_ref().unwrap()
+                        &*client.lock().unwrap().send_buf.lock().as_ref().unwrap().as_ref().unwrap()
                     ).is_ok();
-                    *client_tx.lock().unwrap().send_buf.lock().unwrap() = None;
+                    *client.lock().unwrap().send_buf.lock().unwrap() = None;
                 }
 
                 if !*connected_cln.lock().unwrap() {
@@ -103,7 +102,7 @@ impl TlsClient {
                 match rx.poll_read(&mut buffer) {
                     Ok(Async::Ready(n)) => {
                         if n > 0 {
-                            client_rx.lock().unwrap().process_rx(&buffer[..n].to_vec());
+                            client.lock().unwrap().process_rx(&buffer[..n].to_vec());
                         } else {
                             warn!("Server disconnected");
                             *connected_cln.lock().unwrap() = false;

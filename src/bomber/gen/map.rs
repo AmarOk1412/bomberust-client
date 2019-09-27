@@ -95,7 +95,10 @@ impl Map {
             let mut posy: usize = 0;
             let mut player = MapPlayer {
                 x: 0.5,
-                y: 0.5
+                y: 0.5,
+                radius: 2,
+                speed_factor: 1.0,
+                bomb: 1,
             };
             while !valid_pos {
                 let random_x : usize = rng.gen();
@@ -267,7 +270,7 @@ impl fmt::Display for Map {
             }
             // Draw square
             match sq.sq_type {
-                SquareType::Water => map_str.push('W'),
+                SquareType::Water => map_str.push('H'),
                 SquareType::Empty => {
                     match &self.items[x] {
                         Some(i) => {

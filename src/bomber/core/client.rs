@@ -144,7 +144,7 @@ impl Client {
         }
     }
 
-    pub fn process_rx(&mut self, buf: &Vec<u8>) {
+    pub fn process_rx(&mut self, buf: &mut Vec<u8>) {
         let mut pkts: Vec<Vec<u8>> = Vec::new();
         let rtp_buf = &mut self.rtp_buf;
         let size = buf.len() as u16;
@@ -152,7 +152,7 @@ impl Client {
         loop {
             let mut pkt_len = size - parsed;
             let mut store_remaining = true;
-            let mut start = parsed;
+            let mut start = 0;
 
             if rtp_buf.size != 0 || rtp_buf.wanted != 0 {
                 // There is a packet to complete
@@ -171,7 +171,7 @@ impl Client {
                     // We have enough data to build the new packet to parse
                     store_remaining = false;
                     let eaten_bytes = rtp_buf.wanted - rtp_buf.size;
-                    rtp_buf.data[rtp_buf.size as usize..]
+                    rtp_buf.data[rtp_buf.size as usize..((rtp_buf.size + eaten_bytes) as usize)]
                         .copy_from_slice(&buf[(parsed as usize)..(parsed as usize + eaten_bytes as usize)]);
                     pkt_len = rtp_buf.wanted;
                     parsed += eaten_bytes;
@@ -191,13 +191,14 @@ impl Client {
             }
             if store_remaining {
                 let stored_size = size - parsed;
-                rtp_buf.data[rtp_buf.size as usize..]
+                rtp_buf.data[rtp_buf.size as usize..((rtp_buf.size + stored_size) as usize)]
                     .copy_from_slice(&buf[(parsed as usize)..(parsed as usize + stored_size as usize)]);
                 rtp_buf.size += stored_size;
                 break;
             }
 
             let pkt = buf[(start as usize)..(start as usize + pkt_len as usize)].to_vec();
+            buf.drain(..(start + pkt_len) as usize);
             pkts.push(pkt);
             if parsed >= size {
                 break;

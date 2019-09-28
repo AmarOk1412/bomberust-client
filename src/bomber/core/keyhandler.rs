@@ -76,7 +76,8 @@ impl KeyHandler {
         println!(" g          start a new game");
         println!("");
         println!("Possible commands (in game):");
-        println!("Send e,s,d,f to move or SPACE to put a bomb");
+        println!("Send w,a,s,d to move or SPACE to put a bomb");
+        println!("Send e to use special");
     }
 
     pub fn run(&mut self) {
@@ -117,16 +118,16 @@ impl KeyHandler {
                     let room: u64 = String::from(&s[2..]).parse().unwrap_or(0);
                     let msg = JoinMsg::new(room);
                     msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
-                } else if s == "s" {
+                } else if s == "a" {
                     let msg = MoveMsg::new(Direction::West);
                     msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
-                } else if s == "d" {
+                } else if s == "s" {
                     let msg = MoveMsg::new(Direction::South);
                     msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
-                } else if s == "f" {
+                } else if s == "d" {
                     let msg = MoveMsg::new(Direction::East);
                     msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
-                } else if s == "e" {
+                } else if s == "w" {
                     let msg = MoveMsg::new(Direction::North);
                     msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
                 }

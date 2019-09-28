@@ -102,7 +102,7 @@ impl TlsClient {
                 match rx.poll_read(&mut buffer) {
                     Ok(Async::Ready(n)) => {
                         if n > 0 {
-                            client.lock().unwrap().process_rx(&buffer[..n].to_vec());
+                            client.lock().unwrap().process_rx(&mut buffer[..n].to_vec());
                         } else {
                             warn!("Server disconnected");
                             *connected_cln.lock().unwrap() = false;

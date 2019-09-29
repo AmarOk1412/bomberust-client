@@ -48,7 +48,8 @@ pub struct Client
     pub send_buf: Arc<Mutex<Option<Vec<u8>>>>,
     pub tx: mpsc::Sender<u8>,
     pub rtp_buf: RtpBuf,
-    pub map: Option<Map>
+    pub map: Option<Map>,
+    linked_id: Option<u64>
 }
 
 impl Client {
@@ -61,7 +62,8 @@ impl Client {
                 size: 0,
                 wanted: 0,
             },
-            map: None
+            map: None,
+            linked_id: None
         }
     }
 
@@ -105,6 +107,9 @@ impl Client {
         let map = self.map.as_mut().unwrap();
         map.players.remove(diff.id as usize);
         println!("{}", map);
+        if self.linked_id.is_some() && self.linked_id.unwrap() == diff.id {
+            println!("YOU DIED!");
+        }
     }
 
     pub fn parse_rtp(&mut self, pkt: Vec<u8>) {
@@ -138,6 +143,9 @@ impl Client {
             } else if msg_type == "create_item" {
                 let msg: CreateItem = Deserialize::deserialize(&mut de).unwrap();
                 self.create_item(msg);
+            } else if msg_type == "player_identity" {
+                let msg: PlayerIdentity = Deserialize::deserialize(&mut de).unwrap();
+                self.linked_id = Some(msg.id);
             } else {
                 info!("unknown type: {}", msg_type);
             }

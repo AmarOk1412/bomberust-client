@@ -106,7 +106,7 @@ impl Client {
     fn player_die(&mut self, diff: PlayerDie) {
         let map = self.map.as_mut().unwrap();
         if diff.id < map.players.len() as u64 {
-            map.players.remove(diff.id as usize);
+            map.players[diff.id as usize].dead = true;
             println!("{}", map);
             if self.linked_id.is_some() && self.linked_id.unwrap() == diff.id {
                 println!("YOU DIED!");

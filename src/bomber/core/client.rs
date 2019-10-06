@@ -67,7 +67,7 @@ impl Client {
         }
     }
 
-    pub fn move_player(&mut self, diff: PlayerMove) {
+    fn move_player(&mut self, diff: PlayerMove) {
         let map = self.map.as_mut().unwrap();
         let player = &mut map.players[diff.id as usize];
         player.x = diff.x;
@@ -75,41 +75,50 @@ impl Client {
         println!("{}", map);
     }
 
-    pub fn player_put_bomb(&mut self, diff: PlayerPutBomb) {
+    fn player_put_bomb(&mut self, diff: PlayerPutBomb) {
         let map = self.map.as_mut().unwrap();
         let item = &mut map.items[diff.x + diff.y * map.w];
         *item = Some(Box::new(bomb::BombItem {}));
         println!("{}", map);
     }
 
-    pub fn bomb_explode(&mut self, diff: BombExplode) {
+    fn bomb_explode(&mut self, diff: BombExplode) {
         let map = self.map.as_mut().unwrap();
         let item = &mut map.items[diff.w as usize + diff.h as usize * map.w];
         *item = None;
         println!("{}", map);
     }
 
-    pub fn create_item(&mut self, diff: CreateItem) {
+    fn create_item(&mut self, diff: CreateItem) {
         let map = self.map.as_mut().unwrap();
         let item = &mut map.items[diff.w as usize + diff.h as usize * map.w];
         *item = diff.item;
         println!("{}", map);
     }
 
-    pub fn destroy_item(&mut self, diff: DestroyItem) {
+    fn destroy_item(&mut self, diff: DestroyItem) {
         let map = self.map.as_mut().unwrap();
         let item = &mut map.items[diff.w as usize + diff.h as usize * map.w];
         *item = None;
         println!("{}", map);
     }
 
-    pub fn player_die(&mut self, diff: PlayerDie) {
+    fn player_die(&mut self, diff: PlayerDie) {
         let map = self.map.as_mut().unwrap();
-        map.players.remove(diff.id as usize);
-        println!("{}", map);
-        if self.linked_id.is_some() && self.linked_id.unwrap() == diff.id {
-            println!("YOU DIED!");
+        if diff.id < map.players.len() as u64 {
+            map.players.remove(diff.id as usize);
+            println!("{}", map);
+            if self.linked_id.is_some() && self.linked_id.unwrap() == diff.id {
+                println!("YOU DIED!");
+            }
         }
+    }
+
+    fn update_square(&mut self, diff: UpdateSquare) {
+        let map = self.map.as_mut().unwrap();
+        let square = &mut map.squares[diff.x as usize + diff.y as usize * map.w];
+        square.sq_type = diff.square;
+        println!("{}", map);
     }
 
     pub fn parse_rtp(&mut self, pkt: Vec<u8>) {
@@ -146,6 +155,9 @@ impl Client {
             } else if msg_type == "player_identity" {
                 let msg: PlayerIdentity = Deserialize::deserialize(&mut de).unwrap();
                 self.linked_id = Some(msg.id);
+            } else if msg_type == "update_square" {
+                let msg: UpdateSquare = Deserialize::deserialize(&mut de).unwrap();
+                self.update_square(msg);
             } else {
                 info!("unknown type: {}", msg_type);
             }

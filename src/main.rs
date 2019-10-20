@@ -68,7 +68,7 @@ use termion::raw::IntoRawMode;
 use termion::screen::AlternateScreen;
 use tui::backend::TermionBackend;
 use tui::layout::{Constraint, Direction, Layout, Rect};
-use tui::style::Color;
+use tui::style::{Style, Color};
 use tui::widgets::canvas::{Canvas, Map, MapResolution, Rectangle};
 use tui::widgets::{Block, Borders, Widget};
 use tui::Terminal;
@@ -136,17 +136,19 @@ fn main() -> Result<(), failure::Error> {
                                         (13 + 2) * square_size),
                         color: Color::Red,
                     });
-
-                    ctx.draw(&Rectangle {
-                        rect: app.player,
-                        color: Color::Blue,
-                    });
                 })
                 .x_bounds([0.0, size.width as f64])
                 .y_bounds([0.0, size.height as f64])
                 .render(&mut f, size);
             app.player.width = std::cmp::max(2, square_size - 2);
             app.player.height = std::cmp::max(2, square_size - 2);
+
+
+            Canvas::default()
+                .block(Block::default().borders(Borders::NONE).style(Style::default().bg(Color::Blue)))
+                .paint(|ctx| {
+                })
+                .render(&mut f, app.player);
         })?;
 
 
@@ -156,10 +158,10 @@ fn main() -> Result<(), failure::Error> {
                     break;
                 }
                 Key::Down => {
-                    app.player.y -= 1;
+                    app.player.y += 1;
                 }
                 Key::Up => {
-                    app.player.y += 1;
+                    app.player.y -= 1;
                 }
                 Key::Right => {
                     app.player.x += 1;

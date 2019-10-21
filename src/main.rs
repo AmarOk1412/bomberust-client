@@ -77,16 +77,36 @@ use util::{Config, Event, Events};
 
 struct App {
     player: Rect,
+    game_x: u16,
+    game_y: u16,
+    game_h: u16,
+    game_w: u16,
 }
 
 impl App {
     fn new() -> App {
         App {
             player: Rect::new(0, 0, 0, 0),
+            game_x: 0,
+            game_y: 0,
+            game_h: 0,
+            game_w: 0,
         }
     }
 
     fn update(&mut self) {
+
+        if self.player.y > self.game_y + self.game_h - self.player.height {
+            self.player.y = self.game_y + self.game_h - self.player.height;
+        } else if self.player.y < self.game_y {
+            self.player.y = self.game_y;
+        }
+
+        if self.player.x > self.game_x + self.game_w - self.player.width {
+            self.player.x = self.game_x + self.game_w - self.player.width;
+        } else if self.player.x < self.game_x {
+            self.player.x = self.game_x;
+        }
     }
 }
 
@@ -112,43 +132,55 @@ fn main() -> Result<(), failure::Error> {
     loop {
         terminal.draw(|mut f| {
             let size = f.size();
-            let w = size.width / (13 + 2);
+            let w = size.width / (23 + 2);
             let h = size.height / (13 + 2);
             let square_size = std::cmp::min(w, h);
+            let offset_x = ((((size.width as f32 / square_size as f32) - 23 as f32)  * square_size as f32) / 2.0) as u16;
+            let offset_y = ((((size.height as f32 / square_size as f32) - 13 as f32)  * square_size as f32) / 2.0) as u16;
+
             Canvas::default()
                 .block(Block::default().borders(Borders::ALL).title("Bomberust"))
                 .paint(|ctx| {
-                    // TODO size
-                    let offset_x = ((((size.width as f32 / square_size as f32) - 13 as f32)  * square_size as f32) / 2.0) as u16;
-                    let offset_y = ((((size.height as f32 / square_size as f32) - 13 as f32)  * square_size as f32) / 2.0) as u16;
-                    for x in 0..13 {
-                        for y in 0..13 {
-                            ctx.draw(&Rectangle {
-                                rect: Rect::new(x * square_size + offset_x, y * square_size + offset_y, square_size, square_size),
-                                color: Color::Yellow,
-                            });
-                        }
-                    }
-                    ctx.draw(&Rectangle {
-                        rect: Rect::new(offset_x - square_size,
-                                        offset_y - square_size,
-                                        (13 + 2) * square_size,
-                                        (13 + 2) * square_size),
-                        color: Color::Red,
-                    });
                 })
                 .x_bounds([0.0, size.width as f64])
                 .y_bounds([0.0, size.height as f64])
                 .render(&mut f, size);
-            app.player.width = std::cmp::max(2, square_size - 2);
-            app.player.height = std::cmp::max(2, square_size - 2);
 
+            Canvas::default()
+                .paint(|ctx| {})
+                .block(Block::default().borders(Borders::NONE).style(Style::default().bg(Color::White)))
+                .render(&mut f, Rect::new(offset_x - square_size,
+                                        offset_y - square_size,
+                                        (23 + 2) * square_size,
+                                        (13 + 2) * square_size));
+            // TODO size
+            for x in 0..23 {
+                for y in 0..13 {
+                    let mut color = Color::Yellow;
+                    if x % 2 == 1 && y % 2 == 1 {
+                        color = Color::Black;
+                    } 
+                    Canvas::default()
+                        .paint(|ctx| {})
+                        .block(Block::default().borders(Borders::NONE).style(Style::default().bg(color)))
+                        .render(&mut f, Rect::new(x * square_size + offset_x, y * square_size + offset_y, square_size, square_size));
+                }
+            }
+
+            app.player.width = square_size;//std::cmp::max(2, square_size);
+            app.player.height = square_size;//std::cmp::max(2, square_size);
+            app.game_x = offset_x;
+            app.game_y = offset_y;
+            app.game_w = 23 * square_size;
+            app.game_h = 13 * square_size;
 
             Canvas::default()
                 .block(Block::default().borders(Borders::NONE).style(Style::default().bg(Color::Blue)))
                 .paint(|ctx| {
                 })
                 .render(&mut f, app.player);
+
+
         })?;
 
 
@@ -158,16 +190,24 @@ fn main() -> Result<(), failure::Error> {
                     break;
                 }
                 Key::Down => {
-                    app.player.y += 1;
+                    if app.player.y < app.game_y + app.game_h - app.player.height {
+                        app.player.y += 1;
+                    }
                 }
                 Key::Up => {
-                    app.player.y -= 1;
+                    if app.player.y > app.game_y {
+                        app.player.y -= 1;
+                    }
                 }
                 Key::Right => {
-                    app.player.x += 1;
+                    if app.player.x < app.game_x + app.game_w - app.player.width {
+                        app.player.x += 1;
+                    }
                 }
                 Key::Left => {
-                    app.player.x -= 1;
+                    if app.player.x > app.game_x {
+                        app.player.x -= 1;
+                    }
                 }
 
                 _ => {}

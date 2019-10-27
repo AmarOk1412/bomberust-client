@@ -27,6 +27,8 @@
 
 mod client;
 mod keyhandler;
+mod tuiclient;
 
 pub use client::Client;
 pub use keyhandler::KeyHandler;
+pub use tuiclient::TuiClient;

@@ -43,7 +43,7 @@ extern crate webpki_roots;
 
 mod bomber;
 
-use bomber::core::{Client, KeyHandler};
+use bomber::core::{Client, KeyHandler, TuiClient};
 use bomber::net::{TlsClient, TlsClientConfig};
 
 use std::sync::{Arc, Mutex};
@@ -61,14 +61,11 @@ extern crate termion;
 #[allow(dead_code)]
 mod util;
 
-use std::io;
+/*use std::io;
 use std::time::Duration;
 
-use termion::event::Key;
-use termion::input::MouseTerminal;
-use termion::raw::IntoRawMode;
-use termion::screen::AlternateScreen;
-use tui::backend::TermionBackend;
+
+
 use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::style::{Style, Color};
 use tui::widgets::canvas::{Canvas, Map, MapResolution, Rectangle};
@@ -110,11 +107,13 @@ impl App {
             self.player.x = self.game_x;
         }
     }
-}
+}*/
 
-fn main() -> Result<(), failure::Error> {
+fn main() {
+    let mut client = TuiClient::new();
+    client.render();
     // Terminal initialization
-    let stdout = io::stdout().into_raw_mode()?;
+    /*let stdout = io::stdout().into_raw_mode()?;
     let stdout = MouseTerminal::from(stdout);
     let stdout = AlternateScreen::from(stdout);
     let backend = TermionBackend::new(stdout);
@@ -228,7 +227,7 @@ fn main() -> Result<(), failure::Error> {
         }
     }
 
-    Ok(())
+    Ok(())*/
 }
 
 

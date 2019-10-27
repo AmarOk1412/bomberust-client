@@ -48,6 +48,8 @@ use bomber::net::{TlsClient, TlsClientConfig};
 
 use std::sync::{Arc, Mutex};
 use std::thread;
+use tui::widgets::canvas::Line;
+use tui::widgets::canvas::Points;
 use futures::sync::mpsc;
 
 
@@ -175,11 +177,19 @@ fn main() -> Result<(), failure::Error> {
             app.game_h = 13 * square_size;
 
             Canvas::default()
-                .block(Block::default().borders(Borders::NONE).style(Style::default().bg(Color::Blue)))
+                .block(Block::default().borders(Borders::NONE).style(Style::default().bg(Color::LightBlue)))
                 .paint(|ctx| {
+                    //ctx.print(0.0, 0.0, "\n 1 ", Color::Yellow);
                 })
                 .render(&mut f, app.player);
 
+
+            Canvas::default()
+                .block(Block::default().borders(Borders::NONE).style(Style::default().bg(Color::Gray)))
+                .paint(|ctx| { })
+                .x_bounds([0.0, 100.0])
+                .y_bounds([0.0, 100.0])
+                .render(&mut f, Rect::new(0 * square_size + offset_x, 1 * square_size + offset_y, square_size, square_size));
 
         })?;
 

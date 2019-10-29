@@ -7,13 +7,14 @@ use termion::input::MouseTerminal;
 use termion::raw::IntoRawMode;
 use termion::screen::AlternateScreen;
 use tui::backend::TermionBackend;
-use tui::layout::Rect;
 use tui::style::{ Style, Color, Modifier };
 use tui::Terminal;
-use tui::widgets::{ Block, Borders, SelectableList, Widget };
+use tui::layout::{Constraint, Direction, Layout, Rect};
+use tui::widgets::{ Block, Borders, Paragraph, SelectableList, Text, Widget };
 use tui::widgets::canvas::Canvas;
 use tui::terminal::Frame;
 
+// TODO Layout
 
 #[derive(PartialEq)]
 pub enum Location {
@@ -24,18 +25,28 @@ pub enum Location {
     Game
 }
 
+pub struct NewServerInfo {
+    pub name: String,
+    pub hostname: String,
+    pub certificate: String,
+}
+
 pub struct TuiClient<'a> {
     location: Location,
-    selected_server: Option<usize>,
+    selected_item: Option<usize>,
     servers_list: Vec<&'a str>,
+    items_len: usize,
+    new_server_info: Option<NewServerInfo>
 }
 
 impl<'a> TuiClient<'a> {
     pub fn new() -> TuiClient<'a> {
         TuiClient {
             location: Location::Splash,
-            selected_server: Some(0),
-            servers_list: vec!["Add a new server to the list", "127.0.0.1:1412"]
+            selected_item: Some(0),
+            servers_list: vec!["Add a new server to the list", "127.0.0.1:1412"],
+            items_len: 2,
+            new_server_info: None,
         }
     }
 
@@ -75,11 +86,17 @@ impl<'a> TuiClient<'a> {
             match events.next()? {
                 Event::Input(input) => match input {
                     Key::Esc => {
-                        break;
+                        if self.location == Location::Splash {
+                            break;
+                        } else {
+                            self.items_len = 2;
+                            self.selected_item = Some(0);
+                            self.location = Location::Splash;
+                        }
                     },
                     Key::Down => {
-                        self.selected_server = if let Some(selected) = self.selected_server {
-                            if selected >= self.servers_list.len() - 1 {
+                        self.selected_item = if let Some(selected) = self.selected_item {
+                            if selected >= self.items_len - 1 {
                                 Some(0)
                             } else {
                                 Some(selected + 1)
@@ -89,26 +106,49 @@ impl<'a> TuiClient<'a> {
                         };
                     },
                     Key::Up => {
-                        self.selected_server = if let Some(selected) = self.selected_server {
+                        self.selected_item = if let Some(selected) = self.selected_item {
                             if selected > 0 {
                                 Some(selected - 1)
                             } else {
-                                Some(self.servers_list.len() - 1)
+                                Some(self.items_len - 1)
                             }
                         } else {
                             Some(0)
                         };
                     },
-                    Key::Char(' ') => {
+                    Key::Char('\n') => {
                         if self.location == Location::Splash {
-                            let selected = self.selected_server.unwrap_or(0);
+                            let selected = self.selected_item.unwrap_or(0);
                             if selected == 0 {
+                                self.new_server_info = Some(NewServerInfo {
+                                    name: String::new(),
+                                    certificate: String::new(),
+                                    hostname: String::new(),
+                                });
                                 self.location = Location::ConfigureServer;
                             }
-                        } else {
-                            self.location = Location::Splash;
                         }
                     },
+                    Key::Char(c) => {
+                        if self.location == Location::ConfigureServer {
+                            match self.selected_item {
+                                Some(0) => self.new_server_info.as_mut().unwrap().name.push(c),
+                                Some(1) => self.new_server_info.as_mut().unwrap().hostname.push(c),
+                                Some(2) => self.new_server_info.as_mut().unwrap().certificate.push(c),
+                                _ => {}
+                            }
+                        }
+                    },
+                    Key::Backspace => {
+                        if self.location == Location::ConfigureServer {
+                            match self.selected_item {
+                                Some(0) => { self.new_server_info.as_mut().unwrap().name.pop(); },
+                                Some(1) => { self.new_server_info.as_mut().unwrap().hostname.pop(); },
+                                Some(2) => { self.new_server_info.as_mut().unwrap().certificate.pop(); },
+                                _ => {}
+                            }
+                        }
+                    }
                     _ => {}
                 },
                 Event::Tick => {
@@ -121,6 +161,7 @@ impl<'a> TuiClient<'a> {
     }
 
     fn render_splash<B: tui::backend::Backend>(&mut self, mut f: &mut Frame<B>) {
+        // TODO paragraph
         let size = f.size();
         
         let logo_odd = vec!["                                                                    ",
@@ -175,7 +216,7 @@ impl<'a> TuiClient<'a> {
                 }
             })
             .x_bounds([0.0, size.width as f64])
-            .y_bounds([0.0, ((size.height / 2) - 2) as f64])
+            .y_bounds([0.0, (size.height / 2) as f64])
             .render(&mut f, Rect::new(0, 0, size.width, size.height / 2));            
     }
 
@@ -186,7 +227,7 @@ impl<'a> TuiClient<'a> {
         SelectableList::default()
                 .block(Block::default().borders(Borders::ALL).title("Servers"))
                 .items(&self.servers_list)
-                .select(self.selected_server)
+                .select(self.selected_item)
                 .highlight_style(Style::default().fg(Color::LightGreen).modifier(Modifier::BOLD))
                 .highlight_symbol(">")
                 .render(&mut f, Rect::new(0, size.height / 2, size.width, size.height / 2));       
@@ -194,12 +235,27 @@ impl<'a> TuiClient<'a> {
 
     fn configure_new_server<B: tui::backend::Backend>(&mut self, mut f: &mut Frame<B>) {
         let size = f.size();
-        Canvas::default()
-            .block(Block::default().borders(Borders::ALL).title("Configure").style(Style::default().bg(Color::White)))
-            .paint(|ctx| {
-            })
-            .x_bounds([0.0, size.width as f64])
-            .y_bounds([0.0, ((size.height / 2) - 2) as f64])
-            .render(&mut f, Rect::new(0, size.height / 2, size.width, size.height / 2));            
+
+        let name = format!("Player name: {}\n", self.new_server_info.as_ref().unwrap().name);
+        let hostname = format!("Hostname:    {}\n", self.new_server_info.as_ref().unwrap().hostname);
+        let certificate = format!("Certificate: {}\n", self.new_server_info.as_ref().unwrap().certificate);
+
+        let mut playing_text = vec![
+            Text::styled(&name, if self.selected_item == Some(0) { Style::default().fg(Color::LightGreen).modifier(Modifier::BOLD) } else { Style::default() }),
+            Text::styled(&hostname, if self.selected_item == Some(1) { Style::default().fg(Color::LightGreen).modifier(Modifier::BOLD) } else { Style::default() }),
+            Text::styled(&certificate, if self.selected_item == Some(2) { Style::default().fg(Color::LightGreen).modifier(Modifier::BOLD) } else { Style::default() }),
+            Text::styled("Save", if self.selected_item == Some(3) { Style::default().fg(Color::LightGreen).modifier(Modifier::BOLD) } else { Style::default() }),
+        ];
+        self.items_len = playing_text.len();
+
+        Paragraph::new(playing_text.iter())
+            .wrap(true)
+            .style(Style::default().fg(Color::White))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Configure")
+            )
+            .render(f, Rect::new(0, size.height / 2, size.width, size.height / 2));
     }
 }

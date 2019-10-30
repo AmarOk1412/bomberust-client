@@ -127,12 +127,15 @@ impl TlsClient {
                         if n > 0 {
                             client.lock().unwrap().process_rx(&mut buffer[..n].to_vec());
                         } else {
-                            warn!("Server disconnected");
+                            *server_state.lock().unwrap() = Some(ConnectionState::Disconnected);
                             *connected_cln.lock().unwrap() = false;
                         }
                     }
                     Ok(Async::NotReady) => {}
-                    _ => { *connected_cln.lock().unwrap() = false; }
+                    _ => {
+                        *server_state.lock().unwrap() = Some(ConnectionState::Disconnected);
+                        *connected_cln.lock().unwrap() = false;
+                    }
                 };
                 return Ok(());
             }).map_err(move |_e| {

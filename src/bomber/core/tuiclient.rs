@@ -1,5 +1,7 @@
 use crate::util::{ Config, Event, Events };
-use std::io;
+use std::fs::{ self, File };
+use std::io::{ stdout, Write };
+use std::path::Path;
 use std::thread;
 use std::time::{ self, Duration, SystemTime };
 use termion::event::Key;
@@ -25,34 +27,52 @@ pub enum Location {
     Game
 }
 
-pub struct NewServerInfo {
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ServerInfo {
     pub name: String,
     pub hostname: String,
     pub certificate: String,
 }
 
-pub struct TuiClient<'a> {
-    location: Location,
-    selected_item: Option<usize>,
-    servers_list: Vec<&'a str>,
-    items_len: usize,
-    new_server_info: Option<NewServerInfo>
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ClientConfig {
+    servers: Vec<ServerInfo>,
+    default_playername: String,
 }
 
-impl<'a> TuiClient<'a> {
-    pub fn new() -> TuiClient<'a> {
+pub struct TuiClient {
+    location: Location,
+    selected_item: Option<usize>,
+    items_len: usize,
+    new_server_info: Option<ServerInfo>,
+    config: ClientConfig,
+}
+
+impl TuiClient {
+    pub fn new() -> TuiClient {
+        let mut config = ClientConfig {
+            servers: Vec::new(),
+            default_playername: String::new()
+        };
+        if Path::new("config.json").is_file() {
+            let content = fs::read_to_string("config.json").unwrap_or(String::new());
+            config = serde_json::from_str(&content).unwrap_or(ClientConfig {
+                servers: Vec::new(),
+                default_playername: String::new()
+            });
+        }
         TuiClient {
             location: Location::Splash,
             selected_item: Some(0),
-            servers_list: vec!["Add a new server to the list", "127.0.0.1:1412"],
             items_len: 2,
             new_server_info: None,
+            config,
         }
     }
 
     pub fn render(&mut self) -> Result<(), failure::Error> {
         // Terminal initialization
-        let stdout = io::stdout().into_raw_mode()?;
+        let stdout = stdout().into_raw_mode()?;
         let stdout = MouseTerminal::from(stdout);
         let stdout = AlternateScreen::from(stdout);
         let backend = TermionBackend::new(stdout);
@@ -89,7 +109,6 @@ impl<'a> TuiClient<'a> {
                         if self.location == Location::Splash {
                             break;
                         } else {
-                            self.items_len = 2;
                             self.selected_item = Some(0);
                             self.location = Location::Splash;
                         }
@@ -120,15 +139,37 @@ impl<'a> TuiClient<'a> {
                         if self.location == Location::Splash {
                             let selected = self.selected_item.unwrap_or(0);
                             if selected == 0 {
-                                self.new_server_info = Some(NewServerInfo {
+                                self.new_server_info = Some(ServerInfo {
                                     name: String::new(),
                                     certificate: String::new(),
                                     hostname: String::new(),
                                 });
                                 self.location = Location::ConfigureServer;
                             }
+                        } else if self.location == Location::ConfigureServer && self.selected_item == Some(3) {
+                            if self.config.default_playername.is_empty() {
+                                self.config.default_playername = self.new_server_info.clone().unwrap().name;
+                            }
+                            self.config.servers.push(self.new_server_info.clone().unwrap());
+                            self.save_servers();
+                            self.new_server_info = None;
+                            self.selected_item = Some(0);
+                            self.location = Location::Splash;
                         }
                     },
+                    Key::Char('\t') => {
+                        if self.location == Location::ConfigureServer {
+                            self.selected_item = if let Some(selected) = self.selected_item {
+                                if selected >= self.items_len - 1 {
+                                    Some(0)
+                                } else {
+                                    Some(selected + 1)
+                                }
+                            } else {
+                                Some(0)
+                            };
+                        }
+                    }
                     Key::Char(c) => {
                         if self.location == Location::ConfigureServer {
                             match self.selected_item {
@@ -147,6 +188,14 @@ impl<'a> TuiClient<'a> {
                                 Some(2) => { self.new_server_info.as_mut().unwrap().certificate.pop(); },
                                 _ => {}
                             }
+                        }
+                    },
+                    Key::Delete => {
+                        let selection = self.selected_item.unwrap_or(0);
+                        if self.location == Location::Splash && selection > 0 {
+                            self.config.servers.remove(selection - 1);
+                            self.selected_item = Some(0);
+                            self.save_servers();
                         }
                     }
                     _ => {}
@@ -223,10 +272,16 @@ impl<'a> TuiClient<'a> {
     fn draw_server_list<B: tui::backend::Backend>(&mut self, mut f: &mut Frame<B>) {
         let size = f.size();
 
+        let mut servers_list = vec!["Add a new server to the list"];
+        for serv in &self.config.servers {
+            servers_list.push(&*serv.hostname);
+        }
+        self.items_len = servers_list.len();
+
         let style = Style::default().fg(Color::Black).bg(Color::White);
         SelectableList::default()
                 .block(Block::default().borders(Borders::ALL).title("Servers"))
-                .items(&self.servers_list)
+                .items(&servers_list)
                 .select(self.selected_item)
                 .highlight_style(Style::default().fg(Color::LightGreen).modifier(Modifier::BOLD))
                 .highlight_symbol(">")
@@ -257,5 +312,15 @@ impl<'a> TuiClient<'a> {
                     .title("Configure")
             )
             .render(f, Rect::new(0, size.height / 2, size.width, size.height / 2));
+    }
+
+    fn save_servers(&mut self) -> std::io::Result<()> {
+        // TODO test if duplicates are ok?
+        // TODO edit server
+        // TODO check config
+        let content = serde_json::to_string(&self.config)?;
+        let mut file = File::create("config.json")?;
+        file.write_all(content.as_bytes())?;
+        Ok(())
     }
 }

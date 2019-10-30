@@ -1,7 +1,13 @@
+use crate::bomber::core::Client;
+use crate::bomber::net::{ ConnectionState, TlsClient, TlsClientConfig };
 use crate::util::{ Config, Event, Events };
+
+use futures::sync::mpsc;
 use std::fs::{ self, File };
 use std::io::{ stdout, Write };
+use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{ self, Duration, SystemTime };
 use termion::event::Key;
@@ -30,7 +36,7 @@ pub enum Location {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ServerInfo {
     pub name: String,
-    pub hostname: String,
+    pub address: String,
     pub certificate: String,
 }
 
@@ -46,6 +52,10 @@ pub struct TuiClient {
     items_len: usize,
     new_server_info: Option<ServerInfo>,
     config: ClientConfig,
+    client_thread: Option<thread::JoinHandle<()>>,
+    connected_item: Option<String>,
+    server_state: Arc<Mutex<Option<ConnectionState>>>,
+    last_error: String,
 }
 
 impl TuiClient {
@@ -67,6 +77,10 @@ impl TuiClient {
             items_len: 2,
             new_server_info: None,
             config,
+            client_thread: None,
+            connected_item: None,
+            server_state: Arc::new(Mutex::new(None)),
+            last_error: String::new(),
         }
     }
 
@@ -103,6 +117,7 @@ impl TuiClient {
                 }
             });
 
+            // TODO split in functions
             match events.next()? {
                 Event::Input(input) => match input {
                     Key::Esc => {
@@ -140,21 +155,59 @@ impl TuiClient {
                             let selected = self.selected_item.unwrap_or(0);
                             if selected == 0 {
                                 self.new_server_info = Some(ServerInfo {
-                                    name: String::new(),
+                                    name: self.config.default_playername.clone(),
                                     certificate: String::new(),
-                                    hostname: String::new(),
+                                    address: String::new(),
                                 });
+                                self.last_error = String::new();
                                 self.location = Location::ConfigureServer;
+                            } else {
+                                self.connect_server(selected - 1);
                             }
                         } else if self.location == Location::ConfigureServer && self.selected_item == Some(3) {
-                            if self.config.default_playername.is_empty() {
-                                self.config.default_playername = self.new_server_info.clone().unwrap().name;
+                            let new_server = self.new_server_info.clone().unwrap();
+                            if new_server.name.is_empty() {
+                                self.last_error = String::from("Please enter your player name");
+                                continue;
                             }
-                            self.config.servers.push(self.new_server_info.clone().unwrap());
-                            self.save_servers();
+                            if new_server.address.is_empty() {
+                                self.last_error = String::from("Please provide a server address");
+                                continue;
+                            } else {
+                                let server: Result<SocketAddr, _> = new_server.address.parse();
+                                if !server.is_ok() {
+                                    self.last_error = String::from("Incorrect server address");
+                                    continue;
+                                }
+                            }
+                            if self.config.servers.len() == 0 {
+                                self.config.default_playername = new_server.name.clone();
+                            }
+
+                            let mut add_server = true;
+                            for serv in &self.config.servers {
+                                if serv.address == new_server.address {
+                                    add_server = false;
+                                    break;
+                                }
+                            }
+                            if add_server {
+                                self.config.servers.push(new_server);
+                                self.save_servers();
+                            }
                             self.new_server_info = None;
                             self.selected_item = Some(0);
                             self.location = Location::Splash;
+                        } else if self.location == Location::ConfigureServer {
+                            self.selected_item = if let Some(selected) = self.selected_item {
+                                if selected >= self.items_len - 1 {
+                                    Some(0)
+                                } else {
+                                    Some(selected + 1)
+                                }
+                            } else {
+                                Some(0)
+                            };
                         }
                     },
                     Key::Char('\t') => {
@@ -174,7 +227,7 @@ impl TuiClient {
                         if self.location == Location::ConfigureServer {
                             match self.selected_item {
                                 Some(0) => self.new_server_info.as_mut().unwrap().name.push(c),
-                                Some(1) => self.new_server_info.as_mut().unwrap().hostname.push(c),
+                                Some(1) => self.new_server_info.as_mut().unwrap().address.push(c),
                                 Some(2) => self.new_server_info.as_mut().unwrap().certificate.push(c),
                                 _ => {}
                             }
@@ -184,7 +237,7 @@ impl TuiClient {
                         if self.location == Location::ConfigureServer {
                             match self.selected_item {
                                 Some(0) => { self.new_server_info.as_mut().unwrap().name.pop(); },
-                                Some(1) => { self.new_server_info.as_mut().unwrap().hostname.pop(); },
+                                Some(1) => { self.new_server_info.as_mut().unwrap().address.pop(); },
                                 Some(2) => { self.new_server_info.as_mut().unwrap().certificate.pop(); },
                                 _ => {}
                             }
@@ -274,13 +327,18 @@ impl TuiClient {
 
         let mut servers_list = vec!["Add a new server to the list"];
         for serv in &self.config.servers {
-            servers_list.push(&*serv.hostname);
+            servers_list.push(&*serv.address);
         }
         self.items_len = servers_list.len();
 
+        let title = match &self.connected_item {
+            Some(s) => format!("Servers - {} ({})", s, *self.server_state.lock().unwrap().as_ref().unwrap()),
+            None => String::from("Servers")
+        };
+
         let style = Style::default().fg(Color::Black).bg(Color::White);
         SelectableList::default()
-                .block(Block::default().borders(Borders::ALL).title("Servers"))
+                .block(Block::default().borders(Borders::ALL).title(&*title))
                 .items(&servers_list)
                 .select(self.selected_item)
                 .highlight_style(Style::default().fg(Color::LightGreen).modifier(Modifier::BOLD))
@@ -292,16 +350,18 @@ impl TuiClient {
         let size = f.size();
 
         let name = format!("Player name: {}\n", self.new_server_info.as_ref().unwrap().name);
-        let hostname = format!("Hostname:    {}\n", self.new_server_info.as_ref().unwrap().hostname);
+        let address = format!("Address:     {}\n", self.new_server_info.as_ref().unwrap().address);
         let certificate = format!("Certificate: {}\n", self.new_server_info.as_ref().unwrap().certificate);
+        let error = format!("\n{}\n", self.last_error);
 
         let mut playing_text = vec![
             Text::styled(&name, if self.selected_item == Some(0) { Style::default().fg(Color::LightGreen).modifier(Modifier::BOLD) } else { Style::default() }),
-            Text::styled(&hostname, if self.selected_item == Some(1) { Style::default().fg(Color::LightGreen).modifier(Modifier::BOLD) } else { Style::default() }),
+            Text::styled(&address, if self.selected_item == Some(1) { Style::default().fg(Color::LightGreen).modifier(Modifier::BOLD) } else { Style::default() }),
             Text::styled(&certificate, if self.selected_item == Some(2) { Style::default().fg(Color::LightGreen).modifier(Modifier::BOLD) } else { Style::default() }),
             Text::styled("Save", if self.selected_item == Some(3) { Style::default().fg(Color::LightGreen).modifier(Modifier::BOLD) } else { Style::default() }),
+            Text::styled(&error, Style::default().fg(Color::Red).modifier(Modifier::BOLD)),
         ];
-        self.items_len = playing_text.len();
+        self.items_len = playing_text.len() - 1;
 
         Paragraph::new(playing_text.iter())
             .wrap(true)
@@ -315,12 +375,35 @@ impl TuiClient {
     }
 
     fn save_servers(&mut self) -> std::io::Result<()> {
-        // TODO test if duplicates are ok?
-        // TODO edit server
-        // TODO check config
         let content = serde_json::to_string(&self.config)?;
         let mut file = File::create("config.json")?;
         file.write_all(content.as_bytes())?;
         Ok(())
+    }
+
+    fn connect_server(&mut self, server_idx: usize) {
+        if self.config.servers.len() < server_idx || self.client_thread.is_some() {
+            return;
+        }
+
+        let server = self.config.servers.get(server_idx).unwrap().clone();
+        let send_buf: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
+        let send_buf_cloned = send_buf.clone();
+        let (tx, rx) = mpsc::channel::<u8>(65536);
+        *self.server_state.lock().unwrap() = Some(ConnectionState::Connecting);
+        let server_state = self.server_state.clone();
+        self.connected_item = Some(server.address.clone());
+
+        let client = Arc::new(Mutex::new(Client::new(send_buf, tx)));
+        let client_cloned = client.clone();
+        self.client_thread = Some(thread::spawn(move || {
+            let config = TlsClientConfig {
+                server_state,
+                addr: server.address.clone(),
+                cert: server.certificate.clone(),
+                client: client_cloned,
+            };
+            TlsClient::start(&config);
+        }));
     }
 }

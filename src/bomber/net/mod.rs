@@ -29,4 +29,4 @@ mod tlsclient;
 pub mod msg;
 pub mod diff_msg;
 
-pub use tlsclient::{TlsClient, TlsClientConfig};
+pub use tlsclient::{ ConnectionState, TlsClient, TlsClientConfig };

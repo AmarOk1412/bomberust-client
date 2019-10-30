@@ -25,23 +25,39 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **/
 
-
 use futures::Stream;
+use std::fmt;
 use std::fs;
 use std::io::BufReader;
-use std::net::ToSocketAddrs;
+use std::net::SocketAddr;
+use std::sync::{ Arc, Mutex };
 use tokio::io::{ AsyncRead, AsyncWrite };
 use tokio::net::TcpStream;
 use tokio::prelude::{ Async, Future };
 use tokio::timer::Interval;
 use tokio_rustls::{ TlsConnector, rustls::ClientConfig };
-use std::sync::{Arc, Mutex};
 
 use super::super::core::Client;
 
+pub enum ConnectionState {
+    Connecting,
+    Connected,
+    Disconnected,
+}
+
+impl fmt::Display for ConnectionState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            ConnectionState::Connecting => write!(f, "Connecting"),
+            ConnectionState::Connected => write!(f, "Connected"),
+            ConnectionState::Disconnected => write!(f, "Disconnected"),
+        }
+    }
+}
+
 pub struct TlsClientConfig {
-    pub host: String,
-    pub port: u16,
+    pub server_state: Arc<Mutex<Option<ConnectionState>>>,
+    pub addr: String,
     pub cert: String,
     pub client: Arc<Mutex<Client>>
 }
@@ -54,7 +70,6 @@ use futures::future;
 impl TlsClient {
     pub fn start(client_config: &TlsClientConfig) {
 
-        let addr = (&*client_config.host, client_config.port).to_socket_addrs().unwrap().next().unwrap();
         let mut cafile: Option<&str> = None;
         if !client_config.cert.is_empty() {
             cafile = Some(&*client_config.cert);
@@ -71,7 +86,14 @@ impl TlsClient {
 
         let client = client_config.client.clone();
 
-        let socket = TcpStream::connect(&addr);
+        let server_state = client_config.server_state.clone();
+        let server_state_err = client_config.server_state.clone();
+        let server_state_err2 = client_config.server_state.clone();
+        let server: SocketAddr = client_config.addr
+            .parse()
+            .expect("Unable to parse socket address. Please verify config.json");
+
+        let socket = TcpStream::connect(&server);
         let done = socket
         .and_then(move |stream| {
             let domain = webpki::DNSNameRef::try_from_ascii_str("localhost").unwrap();
@@ -87,6 +109,7 @@ impl TlsClient {
                 future::ok(*connected.lock().unwrap())
             })
             .for_each(move |_| {
+               *server_state.lock().unwrap() = Some(ConnectionState::Connected);
                 if client.lock().unwrap().send_buf.lock().unwrap().is_some() {
                     *connected_cln.lock().unwrap() = tx.poll_write(
                         &*client.lock().unwrap().send_buf.lock().as_ref().unwrap().as_ref().unwrap()
@@ -112,10 +135,14 @@ impl TlsClient {
                     _ => { *connected_cln.lock().unwrap() = false; }
                 };
                 return Ok(());
-            }).map_err(|e| error!("=>{}", e));
+            }).map_err(move |_e| {
+               *server_state_err.lock().unwrap() = Some(ConnectionState::Disconnected);
+            });
             tokio::spawn(worker);
             return Ok(());
-        }).map_err(|e| error!("{}", e));
+        }).map_err(move |_e| {
+            *server_state_err2.lock().unwrap() = Some(ConnectionState::Disconnected);
+        });
 
         tokio::run(done);
     }

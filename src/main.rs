@@ -245,14 +245,13 @@ fn main() {
     let client_cloned = client.clone();
     let client_thread = thread::spawn(move || {
         let config = TlsClientConfig {
-            host : String::from("127.0.0.1"),
-            port : 2542,
+            addr
             cert : String::from("./ca.cert"),
             client: client_cloned,
         };
         TlsClient::start(&config);
     });
-
+ 
     let key_handler_thread = thread::spawn(move || {
         let mut key_handler = KeyHandler::new(send_buf_cloned);
         key_handler.run();

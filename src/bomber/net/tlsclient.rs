@@ -39,6 +39,7 @@ use tokio_rustls::{ TlsConnector, rustls::ClientConfig };
 
 use super::super::core::Client;
 
+#[derive(PartialEq)]
 pub enum ConnectionState {
     Connecting,
     Connected,

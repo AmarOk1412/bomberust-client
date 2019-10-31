@@ -18,7 +18,7 @@ termion = "1.5"
 tokio = { version = "0.1.6" }
 tokio-rustls="0.10"
 tokio-stdin-stdout="0.1.5"
-tui = "0.5"
+tui = "0.6.2"
 typetag = "0.1"
 webpki="0.21"
 webpki-roots="0.17"

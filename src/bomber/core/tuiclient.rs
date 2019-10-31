@@ -1,8 +1,11 @@
 use crate::bomber::core::Client;
 use crate::bomber::net::{ ConnectionState, TlsClient, TlsClientConfig };
+use crate::bomber::net::msg::*;
 use crate::util::{ Config, Event, Events };
 
 use futures::sync::mpsc;
+use rmps::Serializer;
+use serde::Serialize;
 use std::fs::{ self, File };
 use std::io::{ stdout, Write };
 use std::net::SocketAddr;
@@ -46,6 +49,7 @@ pub struct ClientConfig {
     default_playername: String,
 }
 
+// TODO separate by layout
 pub struct TuiClient {
     location: Location,
     selected_item: Option<usize>,
@@ -56,6 +60,8 @@ pub struct TuiClient {
     connected_item: Option<String>,
     server_state: Arc<Mutex<Option<ConnectionState>>>,
     last_error: String,
+    room_to_join: String,
+    send_buf: Arc<Mutex<Option<Vec<u8>>>>,
 }
 
 impl TuiClient {
@@ -81,6 +87,8 @@ impl TuiClient {
             connected_item: None,
             server_state: Arc::new(Mutex::new(None)),
             last_error: String::new(),
+            send_buf: Arc::new(Mutex::new(None)),
+            room_to_join: String::new(),
         }
     }
 
@@ -107,154 +115,55 @@ impl TuiClient {
                 match self.location {
                     Location::Splash => {
                         self.render_splash(&mut f);
-                        self.draw_server_list(&mut f);
+                        self.draw_servers_list(&mut f);
                     },
                     Location::ConfigureServer => {
                         self.render_splash(&mut f);
                         self.configure_new_server(&mut f);
+                    },
+                    Location::Lobby => {
+                        self.render_splash(&mut f);
+                        self.draw_rooms_list(&mut f);
+                    },
+                    Location::Room => {
+                        self.render_splash(&mut f);
+                        self.draw_room_view(&mut f);
                     }
                     _ => { println!("TODO"); }
                 }
             });
 
-            // TODO split in functions
-            match events.next()? {
-                Event::Input(input) => match input {
-                    Key::Esc => {
-                        if self.location == Location::Splash {
-                            break;
-                        } else {
+            match self.location {
+                Location::Splash => {
+                    if !self.events_splash(&events) {
+                        break;
+                    }
+                    if self.server_state.lock().unwrap().is_some() {
+                        // TODO partialeq
+                        let formatted = format!("{}", *self.server_state.lock().unwrap().as_ref().unwrap());
+                        if formatted == "Connected" {
                             self.selected_item = Some(0);
-                            self.location = Location::Splash;
-                        }
-                    },
-                    Key::Down => {
-                        self.selected_item = if let Some(selected) = self.selected_item {
-                            if selected >= self.items_len - 1 {
-                                Some(0)
-                            } else {
-                                Some(selected + 1)
-                            }
-                        } else {
-                            Some(0)
-                        };
-                    },
-                    Key::Up => {
-                        self.selected_item = if let Some(selected) = self.selected_item {
-                            if selected > 0 {
-                                Some(selected - 1)
-                            } else {
-                                Some(self.items_len - 1)
-                            }
-                        } else {
-                            Some(0)
-                        };
-                    },
-                    Key::Char('\n') => {
-                        if self.location == Location::Splash {
-                            let selected = self.selected_item.unwrap_or(0);
-                            if selected == 0 {
-                                self.new_server_info = Some(ServerInfo {
-                                    name: self.config.default_playername.clone(),
-                                    certificate: String::new(),
-                                    address: String::new(),
-                                });
-                                self.last_error = String::new();
-                                self.location = Location::ConfigureServer;
-                            } else {
-                                self.connect_server(selected - 1);
-                            }
-                        } else if self.location == Location::ConfigureServer && self.selected_item == Some(3) {
-                            let new_server = self.new_server_info.clone().unwrap();
-                            if new_server.name.is_empty() {
-                                self.last_error = String::from("Please enter your player name");
-                                continue;
-                            }
-                            if new_server.address.is_empty() {
-                                self.last_error = String::from("Please provide a server address");
-                                continue;
-                            } else {
-                                let server: Result<SocketAddr, _> = new_server.address.parse();
-                                if !server.is_ok() {
-                                    self.last_error = String::from("Incorrect server address");
-                                    continue;
-                                }
-                            }
-                            if self.config.servers.len() == 0 {
-                                self.config.default_playername = new_server.name.clone();
-                            }
-
-                            let mut add_server = true;
-                            for serv in &self.config.servers {
-                                if serv.address == new_server.address {
-                                    add_server = false;
-                                    break;
-                                }
-                            }
-                            if add_server {
-                                self.config.servers.push(new_server);
-                                self.save_servers();
-                            }
-                            self.new_server_info = None;
-                            self.selected_item = Some(0);
-                            self.location = Location::Splash;
-                        } else if self.location == Location::ConfigureServer {
-                            self.selected_item = if let Some(selected) = self.selected_item {
-                                if selected >= self.items_len - 1 {
-                                    Some(0)
-                                } else {
-                                    Some(selected + 1)
-                                }
-                            } else {
-                                Some(0)
-                            };
-                        }
-                    },
-                    Key::Char('\t') => {
-                        if self.location == Location::ConfigureServer {
-                            self.selected_item = if let Some(selected) = self.selected_item {
-                                if selected >= self.items_len - 1 {
-                                    Some(0)
-                                } else {
-                                    Some(selected + 1)
-                                }
-                            } else {
-                                Some(0)
-                            };
+                            self.room_to_join = String::new();
+                            self.location = Location::Lobby;
                         }
                     }
-                    Key::Char(c) => {
-                        if self.location == Location::ConfigureServer {
-                            match self.selected_item {
-                                Some(0) => self.new_server_info.as_mut().unwrap().name.push(c),
-                                Some(1) => self.new_server_info.as_mut().unwrap().address.push(c),
-                                Some(2) => self.new_server_info.as_mut().unwrap().certificate.push(c),
-                                _ => {}
-                            }
-                        }
-                    },
-                    Key::Backspace => {
-                        if self.location == Location::ConfigureServer {
-                            match self.selected_item {
-                                Some(0) => { self.new_server_info.as_mut().unwrap().name.pop(); },
-                                Some(1) => { self.new_server_info.as_mut().unwrap().address.pop(); },
-                                Some(2) => { self.new_server_info.as_mut().unwrap().certificate.pop(); },
-                                _ => {}
-                            }
-                        }
-                    },
-                    Key::Delete => {
-                        let selection = self.selected_item.unwrap_or(0);
-                        if self.location == Location::Splash && selection > 0 {
-                            self.config.servers.remove(selection - 1);
-                            self.selected_item = Some(0);
-                            self.save_servers();
-                        }
-                    }
-                    _ => {}
                 },
-                Event::Tick => {
-                }
+                Location::ConfigureServer => {
+                    if !self.events_splash(&events) {
+                        break;
+                    }
+                },
+                Location::Lobby => {
+                    if !self.events_lobby(&events) {
+                        break;
+                    }
+                },
+                Location::Room => {
+                    if !self.events_in_room(&events) {
+                        break;
+                    }
+                },
+                _ => { println!("TODO"); }
             }
             thread::sleep(ten_millis);
         }
@@ -322,7 +231,7 @@ impl TuiClient {
             .render(&mut f, Rect::new(0, 0, size.width, size.height / 2));            
     }
 
-    fn draw_server_list<B: tui::backend::Backend>(&mut self, mut f: &mut Frame<B>) {
+    fn draw_servers_list<B: tui::backend::Backend>(&mut self, mut f: &mut Frame<B>) {
         let size = f.size();
 
         let mut servers_list = vec!["Add a new server to the list"];
@@ -336,7 +245,7 @@ impl TuiClient {
             None => String::from("Servers")
         };
 
-        let style = Style::default().fg(Color::Black).bg(Color::White);
+        // TODO title style when connecting
         SelectableList::default()
                 .block(Block::default().borders(Borders::ALL).title(&*title))
                 .items(&servers_list)
@@ -345,6 +254,75 @@ impl TuiClient {
                 .highlight_symbol(">")
                 .render(&mut f, Rect::new(0, size.height / 2, size.width, size.height / 2));       
     }
+
+    fn draw_room_view<B: tui::backend::Backend>(&mut self, mut f: &mut Frame<B>) {
+        let size = f.size();
+
+        let now = SystemTime::now();
+        let odd_sec = now.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() % 2 == 0;
+        let color = if odd_sec { Color::Yellow } else { Color::Rgb(225, 125, 0) };
+        let style = Style::default().fg(color);
+
+        Canvas::default()
+            .block(
+                Block::default()
+                .borders(Borders::ALL).title("Room configuration")
+                .border_style(style).title_style(style)
+            ).paint(|ctx| {
+                // TODO
+                ctx.print(0.0, (size.height / 4) as f64, "=> Not available for now", Color::Yellow);
+                ctx.print((size.width / 6) as f64 - 1.5, 1.0, "GO!", Color::White);
+            })
+            .x_bounds([0.0, (size.width / 3) as f64])
+            .y_bounds([0.0, (size.height / 2) as f64])
+            .render(&mut f, Rect::new(0, size.height / 2, size.width / 3, size.height / 2));
+
+        Canvas::default()
+            .paint(|ctx| {})
+            .block(Block::default().borders(Borders::NONE).style(Style::default().bg(color)))
+            .render(&mut f, Rect::new(1, size.height - 4, size.width / 3 - 2, 3));
+
+        Canvas::default()
+            .block(Block::default().borders(Borders::ALL).title("Players"))
+            .paint(|ctx| {
+                ctx.print(0.0, (size.height / 4) as f64, "=> Not available for now", Color::Yellow);
+                // TODO
+            })
+            .x_bounds([0.0, size.width as f64])
+            .y_bounds([0.0, (size.height / 2) as f64])
+            .render(&mut f, Rect::new(size.width / 3, size.height / 2, size.width / 3, size.height / 2));
+
+        Canvas::default()
+            .block(Block::default().borders(Borders::ALL).title("Chat"))
+            .paint(|ctx| {
+                ctx.print(0.0, (size.height / 4) as f64, "=> Not available for now", Color::Yellow);
+                // TODO
+            })
+            .x_bounds([0.0, size.width as f64])
+            .y_bounds([0.0, (size.height / 2) as f64])
+            .render(&mut f, Rect::new(2 * size.width / 3, size.height / 2, size.width / 3, size.height / 2));
+    }
+
+    fn draw_rooms_list<B: tui::backend::Backend>(&mut self, mut f: &mut Frame<B>) {
+        let size = f.size();
+
+        let new_room = format!("{} Create a new room\n", if self.selected_item == Some(0) { ">" } else { "-" });
+        let join_room = format!("{} Join a room (type ID and press Enter): {}\n", if self.selected_item == Some(1) { ">" } else { "-" }, self.room_to_join);
+
+        let mut rooms_list = vec![
+            Text::styled(&new_room, if self.selected_item == Some(0) { Style::default().fg(Color::LightGreen).modifier(Modifier::BOLD) } else { Style::default() }),
+            Text::styled(&join_room, if self.selected_item == Some(1) { Style::default().fg(Color::LightGreen).modifier(Modifier::BOLD) } else { Style::default() }),
+        ];
+        self.items_len = rooms_list.len();
+
+        Paragraph::new(rooms_list.iter())
+            .wrap(true)
+            .style(Style::default().fg(Color::White))
+            .block(Block::default().borders(Borders::ALL).title("Rooms"))
+            .render(&mut f, Rect::new(0, size.height / 2, size.width, size.height / 2));
+    }
+
+    
 
     fn configure_new_server<B: tui::backend::Backend>(&mut self, mut f: &mut Frame<B>) {
         let size = f.size();
@@ -383,18 +361,18 @@ impl TuiClient {
 
     fn connect_server(&mut self, server_idx: usize) {
         if self.config.servers.len() < server_idx || self.client_thread.is_some() {
-            return;
+            if *self.server_state.lock().unwrap() != Some(ConnectionState::Disconnected) {
+                return;
+            }
         }
 
         let server = self.config.servers.get(server_idx).unwrap().clone();
-        let send_buf: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
-        let send_buf_cloned = send_buf.clone();
         let (tx, rx) = mpsc::channel::<u8>(65536);
         *self.server_state.lock().unwrap() = Some(ConnectionState::Connecting);
         let server_state = self.server_state.clone();
         self.connected_item = Some(server.address.clone());
 
-        let client = Arc::new(Mutex::new(Client::new(send_buf, tx)));
+        let client = Arc::new(Mutex::new(Client::new(self.send_buf.clone(), tx)));
         let client_cloned = client.clone();
         self.client_thread = Some(thread::spawn(move || {
             let config = TlsClientConfig {
@@ -405,5 +383,281 @@ impl TuiClient {
             };
             TlsClient::start(&config);
         }));
+    }
+
+    fn events_splash(&mut self, events: &Events) -> bool {
+        // TODO split in functions
+        let events = events.next();
+        if !events.is_ok() {
+            return true;
+        }
+        match events.unwrap() {
+            Event::Input(input) => match input {
+                Key::Esc => {
+                    if self.location == Location::Splash {
+                        return false;
+                    } else {
+                        self.selected_item = Some(0);
+                        self.location = Location::Splash;
+                    }
+                },
+                Key::Down => {
+                    self.selected_item = if let Some(selected) = self.selected_item {
+                        if selected >= self.items_len - 1 {
+                            Some(0)
+                        } else {
+                            Some(selected + 1)
+                        }
+                    } else {
+                        Some(0)
+                    };
+                },
+                Key::Up => {
+                    self.selected_item = if let Some(selected) = self.selected_item {
+                        if selected > 0 {
+                            Some(selected - 1)
+                        } else {
+                            Some(self.items_len - 1)
+                        }
+                    } else {
+                        Some(0)
+                    };
+                },
+                Key::Char('\n') => {
+                    if self.location == Location::Splash {
+                        let selected = self.selected_item.unwrap_or(0);
+                        if selected == 0 {
+                            self.new_server_info = Some(ServerInfo {
+                                name: self.config.default_playername.clone(),
+                                certificate: String::new(),
+                                address: String::new(),
+                            });
+                            self.last_error = String::new();
+                            self.location = Location::ConfigureServer;
+                        } else {
+                            self.connect_server(selected - 1);
+                        }
+                    } else if self.location == Location::ConfigureServer && self.selected_item == Some(3) {
+                        let new_server = self.new_server_info.clone().unwrap();
+                        if new_server.name.is_empty() {
+                            self.last_error = String::from("Please enter your player name");
+                            return true;
+                        }
+                        if new_server.address.is_empty() {
+                            self.last_error = String::from("Please provide a server address");
+                            return true;
+                        } else {
+                            let server: Result<SocketAddr, _> = new_server.address.parse();
+                            if !server.is_ok() {
+                                self.last_error = String::from("Incorrect server address");
+                                return true;
+                            }
+                        }
+                        if self.config.servers.len() == 0 {
+                            self.config.default_playername = new_server.name.clone();
+                        }
+
+                        let mut add_server = true;
+                        for serv in &self.config.servers {
+                            if serv.address == new_server.address {
+                                add_server = false;
+                                break;
+                            }
+                        }
+                        if add_server {
+                            self.config.servers.push(new_server);
+                            self.save_servers();
+                        }
+                        self.new_server_info = None;
+                        self.selected_item = Some(0);
+                        self.location = Location::Splash;
+                    } else if self.location == Location::ConfigureServer {
+                        self.selected_item = if let Some(selected) = self.selected_item {
+                            if selected >= self.items_len - 1 {
+                                Some(0)
+                            } else {
+                                Some(selected + 1)
+                            }
+                        } else {
+                            Some(0)
+                        };
+                    }
+                },
+                Key::Char('\t') => {
+                    if self.location == Location::ConfigureServer {
+                        self.selected_item = if let Some(selected) = self.selected_item {
+                            if selected >= self.items_len - 1 {
+                                Some(0)
+                            } else {
+                                Some(selected + 1)
+                            }
+                        } else {
+                            Some(0)
+                        };
+                    }
+                }
+                Key::Char(c) => {
+                    if self.location == Location::ConfigureServer {
+                        match self.selected_item {
+                            Some(0) => self.new_server_info.as_mut().unwrap().name.push(c),
+                            Some(1) => self.new_server_info.as_mut().unwrap().address.push(c),
+                            Some(2) => self.new_server_info.as_mut().unwrap().certificate.push(c),
+                            _ => {}
+                        }
+                    }
+                },
+                Key::Backspace => {
+                    if self.location == Location::ConfigureServer {
+                        match self.selected_item {
+                            Some(0) => { self.new_server_info.as_mut().unwrap().name.pop(); },
+                            Some(1) => { self.new_server_info.as_mut().unwrap().address.pop(); },
+                            Some(2) => { self.new_server_info.as_mut().unwrap().certificate.pop(); },
+                            _ => {}
+                        }
+                    }
+                },
+                Key::Delete => {
+                    let selection = self.selected_item.unwrap_or(0);
+                    if self.location == Location::Splash && selection > 0 {
+                        self.config.servers.remove(selection - 1);
+                        self.selected_item = Some(0);
+                        self.save_servers();
+                    }
+                }
+                _ => {}
+            },
+            Event::Tick => {
+            }
+        }
+        true
+    }
+
+    fn events_lobby(&mut self, events: &Events) -> bool {
+        let events = events.next();
+        if !events.is_ok() {
+            return true;
+        }
+        match events.unwrap() {
+            Event::Input(input) => match input {
+                Key::Esc => {
+                    return false;
+                    //self.selected_item = Some(0);
+                    //self.location = Location::Splash;
+                    // TODO return to splash + close connection
+                },
+                Key::Down => {
+                    self.selected_item = if let Some(selected) = self.selected_item {
+                        if selected >= self.items_len - 1 {
+                            Some(0)
+                        } else {
+                            Some(selected + 1)
+                        }
+                    } else {
+                        Some(0)
+                    };
+                },
+                Key::Up => {
+                    self.selected_item = if let Some(selected) = self.selected_item {
+                        if selected > 0 {
+                            Some(selected - 1)
+                        } else {
+                            Some(self.items_len - 1)
+                        }
+                    } else {
+                        Some(0)
+                    };
+                },
+                Key::Char('\n') => {
+                    let mut buf = Vec::new();
+                    if self.selected_item == Some(0) {
+                        let msg = Msg::new(String::from("create"));
+                        msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
+                        self.send_rtp(&mut buf);
+                        // TODO server should send some messages
+                        self.location = Location::Room;
+                        self.selected_item = Some(0);
+                    } else if self.selected_item == Some(1) {
+                        let room: u64 = self.room_to_join.parse().unwrap_or(0);
+                        let msg = JoinMsg::new(room);
+                        msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
+                        self.send_rtp(&mut buf);
+                        if room > 0 {
+                            // TODO server should send some messages
+                            self.location = Location::Room;
+                            self.selected_item = Some(0);
+                        }
+                    }
+                },
+                Key::Char('\t') => {
+                    if self.location == Location::ConfigureServer {
+                        self.selected_item = if let Some(selected) = self.selected_item {
+                            if selected >= self.items_len - 1 {
+                                Some(0)
+                            } else {
+                                Some(selected + 1)
+                            }
+                        } else {
+                            Some(0)
+                        };
+                    }
+                },
+                Key::Char(c) => {
+                    self.room_to_join.push(c);
+                },
+                Key::Backspace => {
+                    self.room_to_join.pop();
+                },
+                _ => {}
+            },
+            Event::Tick => {
+            }
+        }
+        true
+    }
+
+    fn events_in_room(&mut self, events: &Events) -> bool {
+        let events = events.next();
+        if !events.is_ok() {
+            return true;
+        }
+        match events.unwrap() {
+            Event::Input(input) => match input {
+                Key::Esc => {
+                    let mut buf = Vec::new();
+                    let msg = Msg::new(String::from("leave"));
+                    msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
+                    // TODO get event from server
+                    self.location = Location::Lobby;
+                    self.room_to_join = String::new();
+                },
+                Key::Char('\n') => {
+                    if self.selected_item == Some(0) {
+                        let mut buf = Vec::new();
+                        let msg = Msg::new(String::from("launch"));
+                        msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
+                        self.send_rtp(&mut buf);
+                        // TODO server should send some messages
+                        self.location = Location::Game;
+                    }
+                },
+                _ => {}
+            },
+            Event::Tick => {
+            }
+        }
+        true
+    }
+
+    fn send_rtp(&mut self, send: &mut Vec<u8>) {
+        if send.len() > (2 as usize).pow(16) {
+            error!("Can't send RTP packet because buffer is too long");
+            return;
+        }
+        let len = send.len() as u16;
+        let mut send_buf : Vec<u8> = Vec::with_capacity(65536);
+        send_buf.push((len >> 8) as u8);
+        send_buf.push((len as u16 % (2 as u16).pow(8)) as u8);
+        send_buf.append(send);
+        *self.send_buf.lock().unwrap() = Some(send_buf);
     }
 }

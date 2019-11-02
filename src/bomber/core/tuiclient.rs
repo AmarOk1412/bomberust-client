@@ -1,6 +1,8 @@
 use crate::bomber::core::Client;
 use crate::bomber::net::{ ConnectionState, TlsClient, TlsClientConfig };
 use crate::bomber::net::msg::*;
+use crate::bomber::gen::item::*;
+use crate::bomber::gen::utils::*;
 use crate::util::{ Config, Event, Events };
 
 use futures::sync::mpsc;
@@ -62,6 +64,7 @@ pub struct TuiClient {
     last_error: String,
     room_to_join: String,
     send_buf: Arc<Mutex<Option<Vec<u8>>>>,
+    client: Option<Arc<Mutex<Client>>>,
 }
 
 impl TuiClient {
@@ -89,6 +92,7 @@ impl TuiClient {
             last_error: String::new(),
             send_buf: Arc::new(Mutex::new(None)),
             room_to_join: String::new(),
+            client: None,
         }
     }
 
@@ -128,8 +132,11 @@ impl TuiClient {
                     Location::Room => {
                         self.render_splash(&mut f);
                         self.draw_room_view(&mut f);
-                    }
-                    _ => { println!("TODO"); }
+                    },
+                    Location::Game => {
+                        self.render_game(&mut f);
+                    },
+                    _ => { }
                 }
             });
 
@@ -163,7 +170,12 @@ impl TuiClient {
                         break;
                     }
                 },
-                _ => { println!("TODO"); }
+                Location::Game => {
+                    if !self.events_in_game(&events) {
+                        break;
+                    }
+                },
+                _ => { }
             }
             thread::sleep(ten_millis);
         }
@@ -229,6 +241,163 @@ impl TuiClient {
             .x_bounds([0.0, size.width as f64])
             .y_bounds([0.0, (size.height / 2) as f64])
             .render(&mut f, Rect::new(0, 0, size.width, size.height / 2));            
+    }
+
+
+    fn render_game<B: tui::backend::Backend>(&mut self, mut f: &mut Frame<B>) {
+        let size = f.size();
+
+        Canvas::default()
+            .block(Block::default().borders(Borders::ALL).title("Bomberust"))
+            .paint(|ctx| {})
+            .render(&mut f, Rect::new(0, 0, size.width, size.height));  
+
+        let client_map = self.client.as_ref().unwrap().lock().unwrap().map.as_ref().unwrap().clone();
+        let square_size = 3;
+        let offset_x = std::cmp::max(0, (size.width as usize - client_map.w * square_size) / 2);
+        let offset_y = std::cmp::max(0, (size.height as usize - client_map.h * square_size) / 2);
+
+        // TODO get from config
+        let players = ["🐧", "🐥", "🦂", "🐙"];
+        let mut player_idx = 0;
+
+        for p in &client_map.players {
+            if p.dead {
+                player_idx += 1;
+                continue;
+            }
+
+            let mut x = (p.x * square_size as f32);
+            if x < 0.0 {
+                x = 0.0;
+            }
+            let mut y = (p.y * square_size as f32);
+            if y < 0.0 {
+                y = 0.0;
+            }
+
+            let rect = Rect::new((x + offset_x as f32) as u16, (y + offset_y as f32) as u16, square_size as u16, square_size as u16);
+            let mut player = vec![Text::raw(players[player_idx])];
+            Paragraph::new(player.iter())
+                .wrap(true)
+                .block(Block::default().borders(Borders::NONE))
+                .render(&mut f, rect);
+            
+            player_idx += 1;
+        }
+
+        for x in 0..client_map.w {
+            for y in 0..client_map.h {
+                let pos = x + client_map.w * y;
+                let sq = client_map.squares[pos];
+
+                let rect = Rect::new((x * square_size + offset_x) as u16, (y * square_size + offset_y) as u16, square_size as u16, square_size as u16);
+
+                match sq.sq_type {
+                    SquareType::Water => {
+                        let mut water = vec![Text::raw("~.~"), Text::raw(".~."), Text::raw("~.~")];
+                        Paragraph::new(water.iter())
+                            .wrap(true)
+                            .block(Block::default().borders(Borders::NONE))
+                            .render(&mut f, rect);
+                        Canvas::default()
+                        .block(Block::default().borders(Borders::NONE).style(Style::default().bg(Color::Blue)))
+                        .paint(|ctx| { })
+                        .render(&mut f, rect);
+                    },
+                    SquareType::Block => {
+                        Canvas::default()
+                        .block(Block::default().borders(Borders::NONE).style(Style::default().bg(Color::Black)))
+                        .paint(|ctx| { })
+                        .render(&mut f, rect);
+                    },
+                    SquareType::Empty => {
+                        
+                        match &client_map.items[pos] {
+                            Some(i) => {
+                                if i.name() == "DestructibleBox" {
+                                    Canvas::default()
+                                    .block(Block::default().borders(Borders::NONE).style(Style::default().bg(Color::Rgb(55,27,0))))
+                                    .paint(|ctx| { })
+                                    .render(&mut f, rect);
+                                } else {        
+                                    if i.name() == "Bomb" {
+                                        let mut bomb = vec![Text::raw("💣")];
+                                        Paragraph::new(bomb.iter())
+                                            .wrap(true)
+                                            .block(Block::default().borders(Borders::NONE))
+                                            .render(&mut f, rect);
+                                    } else if i.name() == "Bonus" {
+                                        let mut bonus = vec![Text::raw("🌟")];
+                                        Paragraph::new(bonus.iter())
+                                            .wrap(true)
+                                            .block(Block::default().borders(Borders::NONE))
+                                            .render(&mut f, rect);
+                                    } else if i.name() == "Malus" {
+                                        let mut malus = vec![Text::raw("💀")];
+                                        Paragraph::new(malus.iter())
+                                            .wrap(true)
+                                            .block(Block::default().borders(Borders::NONE))
+                                            .render(&mut f, rect);
+                                    }
+
+                                    Canvas::default()
+                                    .block(Block::default().borders(Borders::NONE).style(Style::default().bg(Color::Yellow)))
+                                    .paint(|ctx| {})
+                                    .render(&mut f, rect);
+                                }
+                            }
+                            _ => {
+                                Canvas::default()
+                                .block(Block::default().borders(Borders::NONE).style(Style::default().bg(Color::Yellow)))
+                                .paint(|ctx| {})
+                                .render(&mut f, rect);
+                            }
+                        }
+                        
+                    },
+                    SquareType::Wall(d) => {
+                        match d {
+                            crate::bomber::gen::utils::Direction::North => {
+                                let mut wall = vec![Text::raw("╔═╗")];
+                                Paragraph::new(wall.iter())
+                                    .wrap(true)
+                                    .block(Block::default().borders(Borders::NONE))
+                                    .render(&mut f, rect);
+                            },
+                            crate::bomber::gen::utils::Direction::South => {
+                                let rect = Rect::new((x * square_size + offset_x) as u16, (y * square_size + square_size - 1 + offset_y) as u16, square_size as u16, 1);
+                                let mut wall = vec![Text::raw("╚═╝")];
+                                Paragraph::new(wall.iter())
+                                    .wrap(true)
+                                    .block(Block::default().borders(Borders::NONE))
+                                    .render(&mut f, rect);
+                            },
+                            crate::bomber::gen::utils::Direction::West => {
+                                let mut wall = vec![Text::raw("╔\n║\n╚")];
+                                Paragraph::new(wall.iter())
+                                    .wrap(true)
+                                    .block(Block::default().borders(Borders::NONE))
+                                    .render(&mut f, rect);
+                            },
+                            crate::bomber::gen::utils::Direction::East => {
+                                let rect = Rect::new((x * square_size + square_size - 1 + offset_x) as u16, (y * square_size + offset_y) as u16, 1, square_size as u16);
+                                let mut wall = vec![Text::raw("╗\n║\n╝")];
+                                Paragraph::new(wall.iter())
+                                    .wrap(true)
+                                    .block(Block::default().borders(Borders::NONE))
+                                    .render(&mut f, rect);
+                            },
+                        }
+                        Canvas::default()
+                        .block(Block::default().borders(Borders::NONE).style(Style::default().bg(Color::Yellow)))
+                        .paint(|ctx| {})
+                        .render(&mut f, rect);
+                    }
+                }
+            }
+        }
+               
     }
 
     fn draw_servers_list<B: tui::backend::Backend>(&mut self, mut f: &mut Frame<B>) {
@@ -374,6 +543,7 @@ impl TuiClient {
 
         let client = Arc::new(Mutex::new(Client::new(self.send_buf.clone(), tx)));
         let client_cloned = client.clone();
+        self.client = Some(client);
         self.client_thread = Some(thread::spawn(move || {
             let config = TlsClientConfig {
                 server_state,
@@ -639,6 +809,50 @@ impl TuiClient {
                         // TODO server should send some messages
                         self.location = Location::Game;
                     }
+                },
+                _ => {}
+            },
+            Event::Tick => {
+            }
+        }
+        true
+    }
+
+    fn events_in_game(&mut self, events: &Events) -> bool {
+        let events = events.next();
+        if !events.is_ok() {
+            return true;
+        }
+        let mut buf = Vec::new();
+        match events.unwrap() {
+            Event::Input(input) => match input {
+                Key::Esc => {
+                    // TODO
+                },
+                Key::Char('w') => {
+                    let msg = MoveMsg::new(crate::bomber::gen::utils::Direction::North);
+                    msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
+                    self.send_rtp(&mut buf);
+                },
+                Key::Char('a') => {
+                    let msg = MoveMsg::new(crate::bomber::gen::utils::Direction::West);
+                    msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
+                    self.send_rtp(&mut buf);
+                },
+                Key::Char('s') => {
+                    let msg = MoveMsg::new(crate::bomber::gen::utils::Direction::South);
+                    msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
+                    self.send_rtp(&mut buf);
+                },
+                Key::Char('d') => {
+                    let msg = MoveMsg::new(crate::bomber::gen::utils::Direction::East);
+                    msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
+                    self.send_rtp(&mut buf);
+                },
+                Key::Char(' ') => {
+                    let msg = Msg::new(String::from("bomb"));
+                    msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
+                    self.send_rtp(&mut buf);
                 },
                 _ => {}
             },

@@ -72,44 +72,38 @@ impl Client {
         let player = &mut map.players[diff.id as usize];
         player.x = diff.x;
         player.y = diff.y;
-        println!("{}", map);
     }
 
     fn player_put_bomb(&mut self, diff: PlayerPutBomb) {
         let map = self.map.as_mut().unwrap();
         let item = &mut map.items[diff.x + diff.y * map.w];
         *item = Some(Box::new(bomb::BombItem {}));
-        println!("{}", map);
     }
 
     fn bomb_explode(&mut self, diff: BombExplode) {
         let map = self.map.as_mut().unwrap();
         let item = &mut map.items[diff.w as usize + diff.h as usize * map.w];
         *item = None;
-        println!("{}", map);
     }
 
     fn create_item(&mut self, diff: CreateItem) {
         let map = self.map.as_mut().unwrap();
         let item = &mut map.items[diff.w as usize + diff.h as usize * map.w];
         *item = diff.item;
-        println!("{}", map);
     }
 
     fn destroy_item(&mut self, diff: DestroyItem) {
         let map = self.map.as_mut().unwrap();
         let item = &mut map.items[diff.w as usize + diff.h as usize * map.w];
         *item = None;
-        println!("{}", map);
     }
 
     fn player_die(&mut self, diff: PlayerDie) {
         let map = self.map.as_mut().unwrap();
         if diff.id < map.players.len() as u64 {
             map.players[diff.id as usize].dead = true;
-            println!("{}", map);
             if self.linked_id.is_some() && self.linked_id.unwrap() == diff.id {
-                println!("YOU DIED!");
+                // TODO! YOU DIED
             }
         }
     }
@@ -118,7 +112,6 @@ impl Client {
         let map = self.map.as_mut().unwrap();
         let square = &mut map.squares[diff.x as usize + diff.y as usize * map.w];
         square.sq_type = diff.square;
-        println!("{}", map);
     }
 
     pub fn parse_rtp(&mut self, pkt: Vec<u8>) {
@@ -132,7 +125,6 @@ impl Client {
             info!("RX {}", msg_type);
             if msg_type == "map" {
                 let msg: MapMsg = Deserialize::deserialize(&mut de).unwrap();
-                println!("{}", msg.map);
                 self.map = Some(msg.map);
             } else if msg_type == "player_move_diff" {
                 let msg: PlayerMove = Deserialize::deserialize(&mut de).unwrap();

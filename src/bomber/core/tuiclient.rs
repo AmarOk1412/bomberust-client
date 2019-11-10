@@ -161,11 +161,27 @@ impl TuiClient {
                     }
                 },
                 Location::Lobby => {
+                    let current_room_id = self.client.as_ref().unwrap().lock().unwrap().current_room_id;
                     if !self.events_lobby(&events) {
                         break;
                     }
+                    if current_room_id != Some(0) && current_room_id != None {
+                        self.location = Location::Room;
+                        self.selected_item = Some(0);
+                        continue;
+                    }
                 },
                 Location::Room => {
+                    if self.client.as_ref().unwrap().lock().unwrap().linked_id != None {
+                        self.location = Location::Game;
+                        continue;
+                    }
+                    let current_room_id = self.client.as_ref().unwrap().lock().unwrap().current_room_id;
+                    if current_room_id == Some(0) {
+                        self.room_to_join = String::new();
+                        self.location = Location::Lobby;
+                        continue;
+                    }
                     if !self.events_in_room(&events) {
                         break;
                     }
@@ -743,19 +759,11 @@ impl TuiClient {
                         let msg = Msg::new(String::from("create"));
                         msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
                         self.send_rtp(&mut buf);
-                        // TODO server should send some messages
-                        self.location = Location::Room;
-                        self.selected_item = Some(0);
                     } else if self.selected_item == Some(1) {
                         let room: u64 = self.room_to_join.parse().unwrap_or(0);
                         let msg = JoinMsg::new(room);
                         msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
                         self.send_rtp(&mut buf);
-                        if room > 0 {
-                            // TODO server should send some messages
-                            self.location = Location::Room;
-                            self.selected_item = Some(0);
-                        }
                     }
                 },
                 Key::Char('\t') => {
@@ -796,9 +804,7 @@ impl TuiClient {
                     let mut buf = Vec::new();
                     let msg = Msg::new(String::from("leave"));
                     msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
-                    // TODO get event from server
-                    self.location = Location::Lobby;
-                    self.room_to_join = String::new();
+                    self.send_rtp(&mut buf);
                 },
                 Key::Char('\n') => {
                     if self.selected_item == Some(0) {
@@ -806,8 +812,6 @@ impl TuiClient {
                         let msg = Msg::new(String::from("launch"));
                         msg.serialize(&mut Serializer::new(&mut buf)).unwrap();
                         self.send_rtp(&mut buf);
-                        // TODO server should send some messages
-                        self.location = Location::Game;
                     }
                 },
                 _ => {}

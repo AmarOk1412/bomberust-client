@@ -49,7 +49,8 @@ pub struct Client
     pub tx: mpsc::Sender<u8>,
     pub rtp_buf: RtpBuf,
     pub map: Option<Map>,
-    linked_id: Option<u64>
+    pub linked_id: Option<u64>,
+    pub current_room_id: Option<u64>
 }
 
 impl Client {
@@ -63,7 +64,8 @@ impl Client {
                 wanted: 0,
             },
             map: None,
-            linked_id: None
+            linked_id: None,
+            current_room_id: None,
         }
     }
 
@@ -150,6 +152,11 @@ impl Client {
             } else if msg_type == "update_square" {
                 let msg: UpdateSquare = Deserialize::deserialize(&mut de).unwrap();
                 self.update_square(msg);
+            } else if msg_type == "joined" {
+                let msg: JoinedMsg = Deserialize::deserialize(&mut de).unwrap();
+                if msg.success {
+                    self.current_room_id = Some(msg.room);
+                }
             } else {
                 info!("unknown type: {}", msg_type);
             }

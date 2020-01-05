@@ -76,6 +76,22 @@ impl Client {
         player.y = diff.y;
     }
 
+    fn move_bomb(&mut self, diff: BombMove) {
+        if diff.x as usize == diff.old_x as usize
+        && diff.y as usize == diff.old_y as usize {
+            // There is no item animation for now
+            return;
+        }
+        let map = self.map.as_mut().unwrap();
+        let old_item = &mut map.items[diff.old_x as usize + diff.old_y as usize * map.w];
+        if old_item.as_ref().unwrap().name() != "Bomb" {
+            return;
+        }
+        *old_item = None;
+        let new_item = &mut map.items[diff.x as usize + diff.y as usize * map.w];
+        *new_item = Some(Box::new(bomb::BombItem {}));
+    }
+
     fn player_put_bomb(&mut self, diff: PlayerPutBomb) {
         let map = self.map.as_mut().unwrap();
         let item = &mut map.items[diff.x + diff.y * map.w];
@@ -131,6 +147,9 @@ impl Client {
             } else if msg_type == "player_move_diff" {
                 let msg: PlayerMove = Deserialize::deserialize(&mut de).unwrap();
                 self.move_player(msg);
+            } else if msg_type == "bomb_move_diff" {
+                let msg: BombMove = Deserialize::deserialize(&mut de).unwrap();
+                self.move_bomb(msg);
             } else if msg_type == "player_put_bomb_diff" {
                 let msg: PlayerPutBomb = Deserialize::deserialize(&mut de).unwrap();
                 self.player_put_bomb(msg);
